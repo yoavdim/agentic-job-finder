@@ -3,6 +3,7 @@ application_prep/
 
 # ---- personal info (resume, interview answers, PII) ----
 my info/
+.kiro/steering/job-search-prefs.md
 
 # ---- real working data (committed as samples; real files kept local only) ----
 # The committed shortlist.md / applied.md are SAMPLES. The real ones are untracked
