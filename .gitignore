@@ -1,0 +1,23 @@
+# ---- interview/application prep (not part of the job-search tracker) ----
+application_prep/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# ---- IDE / editor ----
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- scratch / temp ----
+*.tmp
+*.log

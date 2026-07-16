@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Tracker</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
+    --text:#e6e9ef; --muted:#98a0b0; --accent:#5b9dff;
+    --good:#3ecf8e; --warn:#e0a458; --done:#3ecf8e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--text)}
+  header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--border);
+         padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0 12px 0 0;font-weight:600}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--border);
+          padding:7px 12px;border-radius:7px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
+  button:disabled{opacity:.45;cursor:default}
+  .status{margin-left:auto;color:var(--muted);font-size:12px}
+  .dirty{color:var(--warn)}
+  .saved{color:var(--good)}
+  .tabs{display:flex;gap:6px;padding:8px 16px 0}
+  .tabs button{border-bottom-left-radius:0;border-bottom-right-radius:0}
+  .tabs button.active{background:var(--panel);border-color:var(--border);border-bottom-color:var(--panel)}
+
+  main{padding:0 16px 60px}
+  .badge{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--muted);white-space:nowrap}
+  .badge.ok{color:var(--good);border-color:var(--good)}
+  .badge.warn{color:var(--warn);border-color:var(--warn)}
+  #splitBanner{display:none;padding:10px 16px;background:rgba(224,164,88,.12);border-bottom:1px solid var(--warn);
+               color:var(--text);font-size:13px;align-items:center;gap:12px}
+  #splitBanner.show{display:flex}
+  #splitBanner b{color:var(--warn)}
+  tr.sel td{background:rgba(91,157,255,.14)}
+  tbody tr{cursor:pointer}
+  .sec{margin:22px 0 8px;font-size:16px;font-weight:600;color:#cdd4e0;border-bottom:1px solid var(--border);padding-bottom:4px}
+  table{width:100%;border-collapse:collapse;margin:6px 0 18px;background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{background:var(--panel2);font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  td.chk{width:58px;text-align:center;white-space:nowrap}
+  .rejbtn{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;padding:0 2px;line-height:1;vertical-align:middle}
+  .rejbtn:hover{color:#e0585a}
+  tr.rejected{opacity:.5}
+  tr.rejected .rejbtn{color:#e0585a}
+  td.comment{width:26%}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  input[type=checkbox]{width:17px;height:17px;cursor:pointer;accent-color:var(--accent)}
+  .cmt{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--border);
+       border-radius:6px;padding:5px 7px;font:inherit;resize:vertical;min-height:30px}
+  .cmt:focus{outline:none;border-color:var(--accent)}
+  .cmt.edited{border-color:var(--warn)}
+  .empty{color:var(--muted);padding:40px 0;text-align:center}
+  .hint{color:var(--muted);font-size:12px;margin:4px 0 0}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+
+  /* reject dialog */
+  #rejectModal{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+               background:rgba(0,0,0,.55)}
+  #rejectModal.show{display:flex}
+  .rj-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:min(560px,92vw);
+          padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .rj-box h3{margin:0 0 4px;font-size:15px}
+  .rj-sub{color:var(--muted);font-size:12px;margin:0 0 12px}
+  .rj-box textarea{width:100%;min-height:64px;background:var(--panel2);color:var(--text);
+          border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;resize:vertical}
+  .rj-box textarea:focus{outline:none;border-color:var(--accent)}
+  .rj-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+  .rj-reason{border:1px solid var(--border);border-radius:14px;padding:4px 11px;font-size:12px;cursor:pointer;
+             background:var(--panel2);color:var(--text);opacity:.75;transition:opacity .1s}
+  .rj-reason:hover{opacity:1}
+  .rj-reason.sel{opacity:1;font-weight:600;box-shadow:0 0 0 2px rgba(255,255,255,.15) inset}
+  .rj-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Tracker</h1>
+  <button id="reconnect" class="primary" style="display:none">Reconnect files</button>
+  <button id="openFolder" class="primary">Open folder…</button>
+  <button id="openFiles">Open file(s)…</button>
+  <button id="save" disabled>Save changes</button>
+  <button id="reload" disabled>Reload from disk</button>
+  <button id="forget" style="display:none" title="Clear remembered files">Forget</button>
+  <label id="showRejWrap" style="display:none;font-size:12px;color:var(--muted);cursor:pointer">
+    <input type="checkbox" id="showRejected"> show rejected</label>
+  <span id="modeBadge" class="badge" title="Split-pane status">…</span>
+  <span id="status" class="status">No files loaded.</span>
+</header>
+<div id="splitBanner"></div>
+<div class="tabs" id="tabs"></div>
+<main id="main">
+  <div class="empty">
+    <p>Open <code>shortlist.md</code> and <code>applied.md</code> to start.</p>
+    <p class="hint">Use “Open folder…” and grant access to the Job Search folder (recommended),
+       or “Open file(s)…” to pick the markdown files directly.<br>
+       Requires a Chromium browser (Chrome/Edge/Brave). Edits are written back surgically —
+       only the checkbox and comment cells you touch are modified.<br>
+       Click any row to open its link in the Chrome split pane beside this tab.</p>
+  </div>
+</main>
+
+<div id="rejectModal">
+  <div class="rj-box">
+    <h3 id="rjTitle">Reject role</h3>
+    <p class="rj-sub">Pick a reason and/or add a note. They're merged into the Comment.</p>
+    <textarea id="rjText" placeholder="why? (optional free text)"></textarea>
+    <div class="rj-reasons" id="rjReasons"></div>
+    <div class="rj-actions">
+      <button id="rjCancel">Cancel</button>
+      <button id="rjConfirm" class="primary">Reject</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- state ----------
+const files = new Map(); // name -> { handle, raw, lines, tables }
+let activeName = null;
+
+const $ = s => document.querySelector(s);
+const statusEl = $("#status");
+const tabsEl = $("#tabs");
+const mainEl = $("#main");
+
+let currentUrl = null;
+let showRejected = false; // when false, [nope] rows are hidden (but kept in the file)
+
+// Rejection reason taxonomy (matches search-playbook.md §7). label shown, code stored, color.
+const REJECT_REASONS = [
+  { code:"link-broken",    label:"link broken",    color:"#e0585a" },
+  { code:"listing-removed",label:"listing removed", color:"#d67c3b" },
+  { code:"too-old",        label:"too old",         color:"#c9a227" },
+  { code:"not-qualified",  label:"not qualified",   color:"#8a63d2" },
+  { code:"not-interested", label:"not interested",  color:"#3b82c4" },
+  { code:"sketchy-site",   label:"sketchy site",    color:"#c44db0" },
+  { code:"other",          label:"other",           color:"#6b7280" },
+];
+let rejectCtx = null; // {f,row,tbl,ci} while the modal is open
+
+// Tab Share integration
+const TAB_SHARE = "http://localhost:8766";
+let tsAvailable = false;      // extension reachable
+let tsSupportsSplit = false;  // splitViewId field present
+let partnerTabId = null;      // the split-partner tab to navigate
+
+function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = "status" + (cls?(" "+cls):""); }
+
+// ---------- markdown table parsing ----------
+const SEP_RE = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/;
+const isRow = l => { const s=l.trim(); return s.startsWith("|") && s.endsWith("|"); };
+
+// split a "| a | b |" row into trimmed cell strings (drops leading/trailing empties from the outer pipes)
+function splitCells(line){
+  const t = line.trim();
+  const inner = t.slice(1, t.length-1); // strip outer pipes
+  return inner.split("|").map(c => c.trim());
+}
+
+// Parse all tables in a file's lines. Returns array of tables:
+// { headerIdx, headers[], chkCol (index|null), commentCol (index|null), rows:[{lineIdx, cells[]}], sectionTitle }
+function parseTables(lines){
+  const tables = [];
+  let lastHeading = "";
+  for (let i=0;i<lines.length;i++){
+    const hm = lines[i].match(/^#{1,6}\s+(.*)$/);
+    if (hm) lastHeading = hm[1].trim();
+    if (SEP_RE.test(lines[i]) && i>0 && isRow(lines[i-1])){
+      const headerIdx = i-1;
+      const headers = splitCells(lines[headerIdx]);
+      const chkCol = headers.findIndex(h => h === "");
+      const commentCol = headers.findIndex(h => h.toLowerCase() === "comment");
+      const rows = [];
+      let j = i+1;
+      while (j<lines.length && isRow(lines[j]) && !SEP_RE.test(lines[j])){
+        rows.push({ lineIdx:j, cells: splitCells(lines[j]) });
+        j++;
+      }
+      tables.push({
+        headerIdx, headers,
+        chkCol: chkCol>=0?chkCol:null,
+        commentCol: commentCol>=0?commentCol:null,
+        rows, sectionTitle:lastHeading
+      });
+      i = j-1;
+    }
+  }
+  return tables;
+}
+
+// ---------- rendering ----------
+const mdLink = /\[([^\]]*)\]\(([^)]+)\)/g;
+function renderCell(text){
+  // escape then re-inject links
+  const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let out=""; let last=0; let m;
+  mdLink.lastIndex=0;
+  while((m=mdLink.exec(text))){
+    out += esc(text.slice(last,m.index));
+    const label = esc(m[1]||m[2]);
+    const url = m[2].replace(/"/g,"&quot;");
+    out += `<a href="${url}" target="_blank" rel="noopener">${label}</a>`;
+    last = m.index + m[0].length;
+  }
+  out += esc(text.slice(last));
+  // bold **x**
+  out = out.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  return out;
+}
+
+function render(){
+  mainEl.innerHTML = "";
+  const f = files.get(activeName);
+  if (!f){ mainEl.innerHTML = '<div class="empty">No file selected.</div>'; return; }
+  if (!f.tables.length){ mainEl.innerHTML = '<div class="empty">No tables found in this file.</div>'; return; }
+
+  let lastSection = null;
+  f.tables.forEach((tbl, ti) => {
+    if (tbl.sectionTitle && tbl.sectionTitle !== lastSection){
+      const h = document.createElement("div");
+      h.className="sec"; h.textContent = tbl.sectionTitle;
+      mainEl.appendChild(h);
+      lastSection = tbl.sectionTitle;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const htr = document.createElement("tr");
+    tbl.headers.forEach((h,ci)=>{
+      const th=document.createElement("th");
+      th.textContent = (ci===tbl.chkCol) ? "✓" : h;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr); table.appendChild(thead);
+
+    const tbody=document.createElement("tbody");
+    let shownCount = 0;
+    tbl.rows.forEach(row=>{
+      const rejected = tbl.chkCol!=null && isRejected(row.cells[tbl.chkCol]);
+      if (rejected && !showRejected) return; // hidden but stays in the file
+      shownCount++;
+      const tr=document.createElement("tr");
+      if (rejected) tr.classList.add("rejected");
+      const url = firstUrl(row.cells);
+      if (url){
+        tr.dataset.url = url;
+        tr.addEventListener("click", ev=>{
+          // don't hijack real clicks on links, checkboxes, buttons, or the comment box
+          const t = ev.target;
+          if (t.closest("a") || t.tagName==="INPUT" || t.tagName==="TEXTAREA" || t.tagName==="BUTTON") return;
+          selectRow(tr, url);
+        });
+      }
+      row.cells.forEach((cell,ci)=>{
+        const td=document.createElement("td");
+        if (ci===tbl.chkCol){
+          td.className="chk";
+          const cb=document.createElement("input");
+          cb.type="checkbox";
+          cb.checked = /\[x\]/i.test(cell);
+          cb.disabled = rejected; // can't be "applied" while rejected
+          cb.title = "Mark applied";
+          cb.addEventListener("change",()=>{
+            row.cells[ci] = cb.checked ? "[x]" : "[ ]";
+            commitRow(f,row,tbl);
+          });
+          td.appendChild(cb);
+          const rej=document.createElement("button");
+          rej.className="rejbtn";
+          rej.textContent = rejected ? "↩" : "✕";
+          rej.title = rejected ? "Un-reject (restore)" : "Reject (hide from list)";
+          rej.addEventListener("click",(e)=>{
+            e.stopPropagation();
+            if (rejected){
+              // un-reject: restore to open, leave comment as-is
+              row.cells[ci] = "[ ]";
+              commitRow(f,row,tbl);
+              render();
+            } else {
+              openRejectModal(f,row,tbl,ci);
+            }
+          });
+          td.appendChild(rej);
+        } else if (ci===tbl.commentCol){
+          td.className="comment";
+          const ta=document.createElement("textarea");
+          ta.className="cmt"; ta.rows=1; ta.value=cell;
+          ta.placeholder="add comment…";
+          ta.addEventListener("input",()=>{
+            const v = ta.value.replace(/\r?\n/g," ").trim(); // markdown cells are single-line
+            row.cells[ci]=v;
+            ta.classList.add("edited");
+            commitRow(f,row,tbl);
+          });
+          td.appendChild(ta);
+        } else {
+          td.innerHTML = renderCell(cell);
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    mainEl.appendChild(table);
+  });
+}
+
+// A status cell is "rejected" when it holds [nope] (case-insensitive).
+function isRejected(cell){ return /\[\s*nope\s*\]/i.test(cell || ""); }
+
+// ---------- reject dialog ----------
+let rjSelectedReason = null;
+
+function buildReasonButtons(){
+  const wrap = $("#rjReasons");
+  wrap.innerHTML = "";
+  REJECT_REASONS.forEach(r=>{
+    const b=document.createElement("button");
+    b.className="rj-reason";
+    b.textContent=r.label;
+    b.style.borderColor=r.color;
+    b.style.color=r.color;
+    b.addEventListener("click",()=>{
+      if (rjSelectedReason===r.code){ // toggle off
+        rjSelectedReason=null; b.classList.remove("sel"); b.style.background="var(--panel2)";
+        return;
+      }
+      rjSelectedReason=r.code;
+      [...wrap.children].forEach(c=>{c.classList.remove("sel");c.style.background="var(--panel2)";});
+      b.classList.add("sel"); b.style.background=r.color+"33";
+    });
+    wrap.appendChild(b);
+  });
+}
+
+function openRejectModal(f,row,tbl,ci){
+  rejectCtx = {f,row,tbl,ci};
+  rjSelectedReason = null;
+  // prefill textarea from an existing comment (minus any leading reason code)
+  const existing = tbl.commentCol!=null ? (row.cells[tbl.commentCol]||"") : "";
+  const roleCol = tbl.headers.findIndex(h=>h.toLowerCase()==="role");
+  $("#rjTitle").textContent = "Reject: " + (roleCol>=0 ? row.cells[roleCol] : "role");
+  $("#rjText").value = existing;
+  buildReasonButtons();
+  $("#rejectModal").classList.add("show");
+  setTimeout(()=>$("#rjText").focus(), 30);
+}
+
+function closeRejectModal(){
+  $("#rejectModal").classList.remove("show");
+  rejectCtx = null; rjSelectedReason = null;
+}
+
+function confirmReject(){
+  if (!rejectCtx) return;
+  const {f,row,tbl,ci} = rejectCtx;
+  const txt = $("#rjText").value.replace(/\r?\n/g," ").trim();
+  // merge: "<reason> — <text>" (either part optional)
+  let merged = "";
+  if (rjSelectedReason && txt) merged = rjSelectedReason + " — " + txt;
+  else if (rjSelectedReason) merged = rjSelectedReason;
+  else merged = txt;
+  row.cells[ci] = "[nope]";
+  if (tbl.commentCol!=null) row.cells[tbl.commentCol] = merged;
+  commitRow(f,row,tbl);
+  closeRejectModal();
+  render();
+}
+
+$("#rjCancel").addEventListener("click", closeRejectModal);
+$("#rjConfirm").addEventListener("click", confirmReject);
+$("#rejectModal").addEventListener("click", e=>{ if(e.target.id==="rejectModal") closeRejectModal(); });
+document.addEventListener("keydown", e=>{
+  if (!$("#rejectModal").classList.contains("show")) return;
+  if (e.key==="Escape") closeRejectModal();
+  if (e.key==="Enter" && (e.ctrlKey||e.metaKey)) confirmReject();
+});
+
+// ---------- row selection / preview ----------
+function firstUrl(cells){
+  for (const c of cells){
+    const m = c.match(/\]\((https?:\/\/[^)]+)\)/) || c.match(/(https?:\/\/[^\s)]+)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+async function selectRow(tr, url){
+  document.querySelectorAll("tr.sel").forEach(r=>r.classList.remove("sel"));
+  tr.classList.add("sel");
+  currentUrl = url;
+  await openInSplit(url);
+}
+
+// Navigate the Chrome split-partner pane to `url`. If no split partner, show the banner.
+async function openInSplit(url){
+  await detectSplitPartner();
+  refreshModeBadge();
+  if (partnerTabId == null){ showSplitBanner(); return; }
+  hideSplitBanner();
+  try{
+    const r = await fetch(TAB_SHARE + "/navigate", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ tabId: partnerTabId, url })
+    });
+    const j = await r.json();
+    if (j.error) setStatus("Navigate failed: "+j.error, "dirty");
+    else setStatus("Opened in split pane");
+  }catch(e){ setStatus("Tab Share error: "+e.message, "dirty"); }
+}
+
+function hideSplitBanner(){ $("#splitBanner").classList.remove("show"); }
+
+function showSplitBanner(){
+  const b = $("#splitBanner");
+  if (!tsAvailable){
+    b.innerHTML = `<span><b>Tab Share offline.</b> Row-clicks can't open a split pane.
+      Start Chromium with the Tab Share extension, then <a href="#" id="redetect">retry</a>.</span>`;
+  } else {
+    b.innerHTML = `<span><b>No split view.</b> Right-click this tab → <b>Split tab</b>
+      (or drag a tab beside it), then <a href="#" id="redetect">re-detect</a>.
+      The clicked row's link will load in the other pane.</span>`;
+  }
+  b.classList.add("show");
+  const rd = document.getElementById("redetect");
+  if (rd) rd.addEventListener("click", async e=>{
+    e.preventDefault();
+    await detectSplitPartner(); refreshModeBadge();
+    if (partnerTabId != null){ hideSplitBanner(); if(currentUrl) openInSplit(currentUrl); }
+  });
+}
+
+// ---------- Tab Share split detection ----------
+async function detectSplitPartner(){
+  partnerTabId = null;
+  try{
+    const r = await fetch(TAB_SHARE + "/tabs", { cache:"no-store" });
+    if (!r.ok) throw new Error("bad status");
+    const data = await r.json();
+    tsAvailable = true;
+    const tabs = data.tabs || [];
+    tsSupportsSplit = tabs.some(t => typeof t.splitViewId !== "undefined" && t.splitViewId !== null);
+    // find my own tab
+    const href = location.href;
+    const me = tabs.find(t => t.url === href) ||
+               tabs.find(t => t.url && href.startsWith(t.url)) ||
+               (data.activeTab && data.activeTab.url === href ? data.activeTab : null);
+    if (me && typeof me.splitViewId !== "undefined" && me.splitViewId !== null && me.splitViewId !== -1){
+      const partner = tabs.find(t => t.splitViewId === me.splitViewId && t.id !== me.id);
+      if (partner) partnerTabId = partner.id;
+    }
+  }catch(e){
+    tsAvailable = false;
+  }
+  return partnerTabId;
+}
+
+function refreshModeBadge(){
+  const badge = $("#modeBadge");
+  if (!tsAvailable){
+    badge.textContent = "Tab Share offline";
+    badge.className = "badge warn";
+  } else if (partnerTabId != null){
+    badge.textContent = "split pane ✓";
+    badge.className = "badge ok";
+  } else {
+    badge.textContent = "no split — split this tab";
+    badge.className = "badge warn";
+  }
+}
+
+async function initTabShare(){
+  await detectSplitPartner();
+  refreshModeBadge();
+  if (partnerTabId == null) showSplitBanner();
+  else hideSplitBanner();
+}
+
+// ---------- surgical edit: rebuild only the changed line ----------
+function rebuildLine(cells){
+  return "| " + cells.join(" | ") + " |";
+}
+function commitRow(f,row,tbl){
+  f.lines[row.lineIdx] = rebuildLine(row.cells);
+  f.dirty = true;
+  updateDirtyUI();
+}
+
+function updateDirtyUI(){
+  const anyDirty = [...files.values()].some(f=>f.dirty);
+  $("#save").disabled = !anyDirty;
+  if (anyDirty) setStatus("Unsaved changes", "dirty");
+}
+
+// ---------- IndexedDB handle persistence ----------
+// FileSystemFileHandle objects are structured-cloneable, so we can stash them in IDB
+// and restore them across reloads. Chrome still requires a one-click permission re-grant
+// per session before writing, but this replaces the full file picker with that single click.
+const IDB_NAME = "job-tracker", IDB_STORE = "handles", IDB_KEY = "mdHandles";
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const req = indexedDB.open(IDB_NAME,1);
+    req.onupgradeneeded = ()=>req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = ()=>res(req.result);
+    req.onerror = ()=>rej(req.error);
+  });
+}
+async function idbPut(key,val){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction(IDB_STORE,"readwrite");
+    tx.objectStore(IDB_STORE).put(val,key);
+    tx.oncomplete = ()=>res(); tx.onerror = ()=>rej(tx.error);
+  });
+}
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction(IDB_STORE,"readonly");
+    const r = tx.objectStore(IDB_STORE).get(key);
+    r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+  });
+}
+async function idbDel(key){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction(IDB_STORE,"readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = ()=>res(); tx.onerror = ()=>rej(tx.error);
+  });
+}
+async function persistHandles(){
+  const arr = [...files.values()].map(f=>f.handle);
+  try{ await idbPut(IDB_KEY, arr); $("#forget").style.display=""; }catch(e){}
+}
+
+async function verifyPermission(handle, write){
+  const opts = { mode: write ? "readwrite" : "read" };
+  if ((await handle.queryPermission(opts)) === "granted") return "granted";
+  return handle.queryPermission(opts); // "prompt" | "denied"
+}
+async function requestPermission(handle, write){
+  const opts = { mode: write ? "readwrite" : "read" };
+  if ((await handle.queryPermission(opts)) === "granted") return true;
+  return (await handle.requestPermission(opts)) === "granted";
+}
+
+// Try to restore cached handles. If all are already granted → load silently (0 clicks).
+// If any need a prompt → show the Reconnect button (1 click) instead of the picker.
+async function restoreHandles(){
+  let arr;
+  try{ arr = await idbGet(IDB_KEY); }catch(e){ return false; }
+  if (!arr || !arr.length) return false;
+  $("#forget").style.display="";
+  let needPrompt = false;
+  for (const h of arr){
+    const state = await verifyPermission(h, true);
+    if (state !== "granted") needPrompt = true;
+  }
+  if (needPrompt){
+    $("#reconnect").style.display="";
+    setStatus("Files remembered — click “Reconnect files” to grant access.");
+    // stash for the reconnect click
+    restoreHandles._pending = arr;
+    return true;
+  }
+  // all granted → load now
+  files.clear(); activeName=null;
+  for (const h of arr) await loadHandle(h);
+  afterLoad();
+  return true;
+}
+
+async function reconnectPending(){
+  const arr = restoreHandles._pending;
+  if (!arr) return;
+  for (const h of arr){
+    const ok = await requestPermission(h, true);
+    if (!ok){ setStatus("Permission denied for "+h.name); return; }
+  }
+  $("#reconnect").style.display="none";
+  files.clear(); activeName=null;
+  for (const h of arr) await loadHandle(h);
+  afterLoad();
+}
+
+// ---------- file IO (File System Access API) ----------
+async function loadHandle(handle){
+  const file = await handle.getFile();
+  const raw = await file.text();
+  const lines = raw.split("\n");
+  const rec = { handle, raw, lines, tables: parseTables(lines), dirty:false };
+  files.set(handle.name, rec);
+  return rec;
+}
+
+async function saveAll(){
+  for (const [name,f] of files){
+    if (!f.dirty) continue;
+    const text = f.lines.join("\n");
+    const w = await f.handle.createWritable();
+    await w.write(text);
+    await w.close();
+    f.raw = text;
+    f.dirty = false;
+  }
+  document.querySelectorAll(".cmt.edited").forEach(e=>e.classList.remove("edited"));
+  setStatus("Saved ✓","saved");
+  $("#save").disabled = true;
+}
+
+async function reloadAll(){
+  for (const [name,f] of files){
+    const file = await f.handle.getFile();
+    const raw = await file.text();
+    f.raw=raw; f.lines=raw.split("\n"); f.tables=parseTables(f.lines); f.dirty=false;
+  }
+  render(); setStatus("Reloaded from disk");
+  $("#save").disabled = true;
+}
+
+function buildTabs(){
+  tabsEl.innerHTML="";
+  for (const name of files.keys()){
+    const b=document.createElement("button");
+    b.textContent=name;
+    if (name===activeName) b.classList.add("active");
+    b.addEventListener("click",()=>{ activeName=name; buildTabs(); render(); });
+    tabsEl.appendChild(b);
+  }
+}
+
+function afterLoad(){
+  if (!activeName && files.size) activeName=[...files.keys()][0];
+  $("#reload").disabled = files.size===0;
+  $("#showRejWrap").style.display = files.size ? "" : "none";
+  buildTabs(); render();
+  setStatus(`${files.size} file(s) loaded.`);
+}
+
+// ---------- entry points ----------
+$("#openFolder").addEventListener("click", async ()=>{
+  if (!window.showDirectoryPicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave, or use “Open file(s)…”."); return; }
+  try{
+    const dir = await window.showDirectoryPicker({ mode:"readwrite" });
+    files.clear(); activeName=null;
+    for await (const [n,h] of dir.entries()){
+      if (h.kind==="file" && /\.md$/i.test(n) && (n==="shortlist.md"||n==="applied.md")){
+        await loadHandle(h);
+      }
+    }
+    if (!files.size){ setStatus("No shortlist.md / applied.md found in that folder."); return; }
+    afterLoad();
+    await persistHandles();
+    $("#reconnect").style.display="none";
+  }catch(e){ if(e.name!=="AbortError") setStatus("Error: "+e.message); }
+});
+
+$("#openFiles").addEventListener("click", async ()=>{
+  if (!window.showOpenFilePicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave."); return; }
+  try{
+    const handles = await window.showOpenFilePicker({
+      multiple:true,
+      types:[{description:"Markdown",accept:{"text/markdown":[".md"]}}]
+    });
+    files.clear(); activeName=null;
+    for (const h of handles) await loadHandle(h);
+    afterLoad();
+    await persistHandles();
+    $("#reconnect").style.display="none";
+  }catch(e){ if(e.name!=="AbortError") setStatus("Error: "+e.message); }
+});
+
+$("#save").addEventListener("click", ()=>saveAll().catch(e=>setStatus("Save failed: "+e.message)));
+$("#reload").addEventListener("click", ()=>{
+  const dirty=[...files.values()].some(f=>f.dirty);
+  if (dirty && !confirm("Discard unsaved changes and reload from disk?")) return;
+  reloadAll().catch(e=>setStatus("Reload failed: "+e.message));
+});
+
+$("#showRejected").addEventListener("change", e=>{ showRejected = e.target.checked; render(); });
+$("#reconnect").addEventListener("click", ()=>reconnectPending().catch(e=>setStatus("Reconnect failed: "+e.message)));
+$("#forget").addEventListener("click", async ()=>{
+  await idbDel(IDB_KEY);
+  restoreHandles._pending=null;
+  $("#forget").style.display="none";
+  $("#reconnect").style.display="none";
+  setStatus("Forgot remembered files.");
+});
+
+window.addEventListener("beforeunload", e=>{
+  if ([...files.values()].some(f=>f.dirty)){ e.preventDefault(); e.returnValue=""; }
+});
+
+// probe Tab Share on startup
+initTabShare();
+// try to restore cached file handles (silent if permission still granted)
+restoreHandles().catch(()=>{});
+</script>
+</body>
+</html>
