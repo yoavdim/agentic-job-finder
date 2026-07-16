@@ -1,6 +1,12 @@
 # ---- interview/application prep (not part of the job-search tracker) ----
 application_prep/
 
+# ---- real working data (committed as samples; real files kept local only) ----
+# The committed shortlist.md / applied.md are SAMPLES. The real ones are untracked
+# (git rm --cached) and ignored here so personal data is never committed.
+/shortlist.md
+/applied.md
+
 # ---- Python ----
 __pycache__/
 *.py[cod]
