@@ -1,102 +1,74 @@
 # Job Search — Kiro-assisted tracker
 
-An agent-driven job-search workflow plus a browser UI for reviewing/triaging roles.
-You drive it by talking to **Kiro**; Kiro follows the steering files to search, filter,
-verify, and maintain two markdown tables. A single-file HTML app (`tracker.html`) gives
-you a nicer view over those tables with a live split-pane job preview.
+Hunt for jobs by chatting with an AI agent. You talk to **Kiro** (or any other LLM),
+and it searches, filters, and keeps two tidy markdown tables up to date (guided by the inclued skills and steering files).
+There's also a little browser app for reviewing roles with a side-by-side job preview.
+
+![The tracker.html UI showing a tiered, color-coded job shortlist](<./Example%20Screen.png>)
+
+> Sample data (fictional job seeker) shown above.
+
+## How to use it
+
+1. **Tell Kiro about you.** Point it at your resume and fill in
+   `.kiro/steering/job-search-prefs.md` (profile, target roles, filters, location). It's
+   auto-loaded, so Kiro uses it on every request.
+2. **Ask for a search pass.** Just say *"run a job search pass."* Kiro syncs what you've
+   applied to from Simplify, searches the web, BuiltIn, and LinkedIn, reads the promising
+   listings, tiers them, and adds keepers to `shortlist.md`.
+3. **Review in the UI.** Open `tracker.html`, click a row to preview the job, tick `[x]`
+   when you apply, or reject it with a reason.
+
+## The browser app (`tracker.html`)
+
+Open it in a **Chromium browser** (Chrome/Edge/Brave) — it reads and writes your `.md`
+files directly.
+
+- **Load:** click **Open folder…** (or **Open file(s)…** to pick the files). It
+  remembers them for next time.
+- **Split preview:** click a row to open its link in a **Chrome Split View** beside the
+  tracker — no iframe, so job boards that block embedding still work. Right-click the tab
+  → **Split tab** to set it up.
+- **Edit:** tick the box to mark applied, or click ✕ to reject with a color-coded reason.
+  Only the cell you touch gets rewritten. Rejected rows hide until you show them.
+
+## Extras you'll want
+
+The Simplify sync and split preview rely on the **Tab Share extension**
+([`yoavdim/tab-share`](https://github.com/yoavdim/tab-share)) — a Chromium extension +
+native host exposing a local API at **`http://localhost:8766`**. It powers the split
+preview and the LinkedIn scripts. It's a standalone open-source project — clone it anywhere
+and follow its own install guide.
+
+Without it, the tracker still views/edits your `.md` files and opens links in new tabs —
+you just lose the split preview and Simplify sync.
+
+## Setup
+
+Easiest path: **ask Kiro to set it up.** The short version:
+
+1. Clone the [Tab Share repo](https://github.com/yoavdim/tab-share) somewhere convenient:
+   `git clone https://github.com/yoavdim/tab-share.git`
+2. Load it in Chromium first to get its extension ID: `chrome://extensions` → Developer
+   mode → **Load unpacked** → pick the repo's `chromium/` folder. Copy the 32-char ID.
+3. Register the native host with that ID: `chromium/install.sh <EXTENSION_ID>` (or
+   `install_snap.sh <EXTENSION_ID>` for snap Chromium). Then reload the extension.
+4. Check it's alive: `curl -s http://localhost:8766/tabs` should return JSON.
+5. Fill in your profile, point Kiro at your CV, and ask for a search pass.
+
+> Full instructions (Firefox build, snap paths, troubleshooting) live in the repo's
+> `INSTALL.md`.
 
 ## What's in here
 
-| File | Purpose |
-|---|---|
-| `.kiro/steering/search-playbook.md` | The **method** — how Kiro searches, filters, dedups, verifies liveness, migrates resolved rows. Auto-loaded steering. |
-| `.kiro/steering/job-search-prefs.md` | The **who/what** — your profile, career goals, hard filters, tier priorities, ATS URL formats. *(Personal — keep local.)* |
-| `.kiro/scripts/linkedin_harvest.py` | Harvests a full LinkedIn search / recommended collection (parallel, paginated). |
-| `.kiro/scripts/read_jobs.py` | Reads full LinkedIn listings (responsibilities + requirements) for triage. |
-| `shortlist.md` | Candidate roles, tiered, with status boxes (`[ ]`/`[x]`/`[nope]`) + Comment. |
-| `applied.md` | Applied / saved / rejected tracker; dedup source. |
-| `tracker.html` | Browser UI over the two `.md` files. |
+| File                                   | Purpose                                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `.kiro/steering/search-playbook.md`  | The**method** — how Kiro searches, filters, dedups, and verifies. Auto-loaded.            |
+| `.kiro/steering/job-search-prefs.md` | The**who/what** — your profile, goals, filters, priorities. *(Personal — keep local.)* |
+| `.kiro/scripts/linkedin_harvest.py`  | Harvests a full LinkedIn search / recommended collection.                                        |
+| `.kiro/scripts/read_jobs.py`         | Reads full LinkedIn listings for triage.                                                         |
+| `shortlist.md`                       | Candidate roles, tiered, with status boxes + comments.                                           |
+| `applied.md`                         | Applied / saved / rejected tracker; dedup source.                                                |
+| `tracker.html`                       | Browser UI over the two`.md` files.                                                            |
 
-> The committed `shortlist.md` / `applied.md` are **samples** — the real ones are
-> git-ignored and stay on your machine only. `tracker.html` opens whichever is on disk.
-
-## How to use it (with Kiro)
-
-1. **Give Kiro your info.** Point it at your CV/resume and fill in
-   `.kiro/steering/job-search-prefs.md` with your profile, target roles, filters, and
-   location. The steering files are auto-loaded, so once they're accurate Kiro applies
-   them on every request.
-2. **Ask Kiro to run a search pass.** e.g. *"run a job search pass"* — it will search the
-   web + BuiltIn + LinkedIn (keyword searches **and** your recommended collection), read
-   the full listing of anything promising, filter/tier it, and add keepers to
-   `shortlist.md`. See `search-playbook.md` for the exact routine.
-3. **Review in the UI.** Open `tracker.html` (below), click rows to preview jobs, tick
-   `[x]` when you apply, or reject with a reason.
-4. **Sync what you applied to.** Ask Kiro to *"sync from Simplify"* — it pulls your
-   Simplify.jobs tracker into `applied.md` and reconciles it against the shortlist.
-
-## The HTML interface (`tracker.html`)
-
-Open `tracker.html` in a **Chromium-based browser** (Chrome/Edge/Brave). It uses the
-File System Access API to read/write your `.md` files directly.
-
-- **Load:** click **Open folder…** and grant access to this folder (or **Open file(s)…**
-  to pick `shortlist.md` / `applied.md`). It remembers the files, so next time it's a
-  one-click reconnect.
-- **Edit:** toggle the status checkbox to mark applied; click ✕ to reject (a dialog lets
-  you pick a color-coded reason + note). Edits are written back surgically — only the
-  cell you touched changes. Rejected rows hide (toggle **show rejected** to see them).
-- **Split-pane job preview:** click a row to open its apply link in a **Chrome Split
-  View** pane beside the tracker — no iframe, so job boards that block embedding still
-  work. To set it up: right-click the `tracker.html` tab → **Split tab** (or drag a tab
-  beside it), then click a row. A banner tells you if no split is detected. The badge in
-  the header shows the split status.
-
-## Dependencies (from a sibling project)
-
-The Simplify sync and the split-pane preview both rely on tooling that lives outside this
-folder, in your global Kiro config (`~/.kiro`, tracked in a separate `kiro-config` repo):
-
-- **Tab Share browser extension** (`~/.kiro/tab_share_extension_chromium/`) — a Chromium
-  extension + native-messaging host that exposes a local HTTP API on
-  **`http://localhost:8766`** (`/tabs`, `/open`, `/navigate`, `/extract`, `/close`, …).
-  The HTML split-preview and the LinkedIn harvest scripts talk to it. Requires the
-  extension loaded in Chromium **and** the native host installed.
-- **`simplify-tracker-sync` skill** (`~/.kiro/skills/simplify-tracker-sync/`) — drives
-  your logged-in Simplify.jobs tab (via Tab Share) to rebuild `applied.md`.
-
-If you don't have these, the tracker still works for viewing/editing the `.md` files and
-opening links in new tabs — you just lose the split-pane preview and the Simplify sync.
-
-## Setup (ask Kiro to help)
-
-Assuming you have Kiro available as an agent, the quickest path is to **ask Kiro to set it
-up** — it can install/copy the pieces for you. The manual outline:
-
-1. **Get the Tab Share extension + skill** from the `kiro-config` project into `~/.kiro/`
-   (extension dir `tab_share_extension_chromium/`, skill dir
-   `skills/simplify-tracker-sync/`). Ask Kiro: *"set up the Tab Share extension and the
-   simplify-tracker-sync skill from kiro-config."*
-2. **Install the native messaging host** (registers the host so Chromium can launch it).
-   The extension folder ships an installer (`install.sh` / `install_snap.sh`). Ask Kiro
-   to run the right one for your setup.
-3. **Load the extension in Chromium:** `chrome://extensions` → enable Developer mode →
-   **Load unpacked** → select `~/.kiro/tab_share_extension_chromium/`.
-4. **Verify the API is up:** `curl -s http://localhost:8766/tabs` should return JSON. Ask
-   Kiro to probe it.
-5. **Fill in your profile** in `.kiro/steering/job-search-prefs.md` and point Kiro at your
-   CV. Then ask it to run a search pass.
-
-> **Snap Chromium note:** if your Chrome/Chromium is installed via **snap** (common on
-> Ubuntu), the native-messaging host needs an **extra install step** — the host manifest
-> must go under the snap's confined config path (e.g.
-> `~/snap/chromium/common/chromium/NativeMessagingHosts/`) rather than the default
-> `~/.config/`. Use the `install_snap.sh` variant, or just ask Kiro — it knows to place
-> the manifest in the snap location and to sync the extension files into
-> `~/snap/chromium/common/…`.
-
-## Privacy
-
-`shortlist.md`, `applied.md`, `my info/` (CV, interview answers), and
-`job-search-prefs.md` hold personal data and are **git-ignored**. Only sample versions of
-the trackers and the generic tooling/steering are committed.
+> The committed `shortlist.md` / `applied.md` are **samples** — the real ones stay local.
