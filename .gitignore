@@ -7,6 +7,7 @@ per job material/
 # ---- personal info (resume, interview answers, PII) ----
 my info/
 .kiro/steering/job-search-prefs.md
+.kiro/steering/simplify-company-aliases.md
 
 # ---- real working data (kept local only; samples ship separately) ----
 # Only shortlist.sample.md / applied.sample.md are committed (fictional demo data).
