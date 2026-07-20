@@ -27,8 +27,9 @@ files directly.
 - **Load:** click **Open folder…** (or **Open file(s)…** to pick the files). It
   remembers them for next time.
 - **Split preview:** click a row to open its link in a **Chrome Split View** beside the
-  tracker — no iframe, so job boards that block embedding still work. Right-click the tab
-  → **Split tab** to set it up.
+  tracker — no iframe, so job boards that block embedding still work. The app can't create
+  the split itself: set it up once by hand (right-click the tab → **Split tab**), then it
+  navigates that pane on each row click.
 - **Edit:** tick the box to mark applied, or click ✕ to reject with a color-coded reason.
   Only the cell you touch gets rewritten. Rejected rows hide until you show them.
 
