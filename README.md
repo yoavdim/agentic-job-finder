@@ -67,8 +67,18 @@ Easiest path: **ask Kiro to set it up.** The short version:
 | `.kiro/steering/job-search-prefs.md` | The**who/what** — your profile, goals, filters, priorities. *(Personal — keep local.)* |
 | `.kiro/scripts/linkedin_harvest.py`  | Harvests a full LinkedIn search / recommended collection.                                        |
 | `.kiro/scripts/read_jobs.py`         | Reads full LinkedIn listings for triage.                                                         |
-| `shortlist.md`                       | Candidate roles, tiered, with status boxes + comments.                                           |
-| `applied.md`                         | Applied / saved / rejected tracker; dedup source.                                                |
+| `shortlist.md`                       | Candidate roles, tiered, with status boxes + comments. *(Yours — local only.)*                   |
+| `applied.md`                         | Applied / saved / rejected tracker; dedup source. *(Yours — local only.)*                        |
+| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data** so the repo runs out of the box.                                  |
 | `tracker.html`                       | Browser UI over the two`.md` files.                                                            |
 
-> The committed `shortlist.md` / `applied.md` are **samples** — the real ones stay local.
+> Your real `shortlist.md` / `applied.md` are **git-ignored** so personal data never gets
+> committed. Only the `*.sample.md` files ship with the repo. To start: copy a sample to the
+> real name (`cp shortlist.sample.md shortlist.md`), or open a sample straight from
+> `tracker.html` via **Open file(s)…**.
+
+## License
+
+Licensed under the [GNU GPL v3](LICENSE) © 2026 Yoav Dim. If you use, modify, or
+redistribute this software, please retain the notice and credit the original author
+([@yoavdim](https://github.com/yoavdim)).
