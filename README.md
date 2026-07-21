@@ -44,6 +44,13 @@ and follow its own install guide.
 Without it, the tracker still views/edits your `.md` files and opens links in new tabs —
 you just lose the split preview and Simplify sync.
 
+The **[Simplify](https://simplify.jobs/) Chrome extension** is a separate, optional tool
+worth grabbing. It autofills job application forms across most ATS platforms, which makes
+working through your shortlist a lot faster. Our workflow can also optionally read the
+applications you've submitted through Simplify and sync them into `applied.md`, so your
+tracker stays current without manual entry. We recommend using it alongside the tracker for
+quicker form filling.
+
 ## Setup
 
 Easiest path: **ask Kiro to set it up.** The short version:
@@ -84,16 +91,16 @@ static HTML file:
 
 ## What's in here
 
-| File                                   | Purpose                                                                                          |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `.kiro/steering/search-playbook.md`  | The **method** — how Kiro searches, filters, dedups, and verifies. Auto-loaded.            |
-| `.kiro/steering/job-search-prefs.md` | The **who/what** — your profile, goals, filters, priorities. *(Personal — keep local.)* |
-| `.kiro/scripts/linkedin_harvest.py`  | Harvests a full LinkedIn search / recommended collection.                                        |
-| `.kiro/scripts/read_jobs.py`         | Reads full LinkedIn listings for triage.                                                         |
-| `shortlist.md`                       | Candidate roles, tiered, with status boxes + comments. *(Yours — local only.)*                   |
-| `applied.md`                         | Applied / saved / rejected tracker; dedup source. *(Yours — local only.)*                        |
-| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data** so the repo runs out of the box.                                  |
-| `tracker.html`                       | Browser UI over the two `.md` files.                                                           |
+| File                                            | Purpose                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `.kiro/steering/search-playbook.md`           | The**method** — how Kiro searches, filters, dedups, and verifies. Auto-loaded.            |
+| `.kiro/steering/job-search-prefs.md`          | The**who/what** — your profile, goals, filters, priorities. *(Personal — keep local.)* |
+| `.kiro/scripts/linkedin_harvest.py`           | Harvests a full LinkedIn search / recommended collection.                                        |
+| `.kiro/scripts/read_jobs.py`                  | Reads full LinkedIn listings for triage.                                                         |
+| `shortlist.md`                                | Candidate roles, tiered, with status boxes + comments.*(Yours — local only.)*                 |
+| `applied.md`                                  | Applied / saved / rejected tracker; dedup source.*(Yours — local only.)*                      |
+| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data** so the repo runs out of the box.                                   |
+| `tracker.html`                                | Browser UI over the two`.md` files.                                                            |
 
 > Your real `shortlist.md` / `applied.md` are **git-ignored** so personal data never gets
 > committed. Only the `*.sample.md` files ship with the repo. To start: copy a sample to the
