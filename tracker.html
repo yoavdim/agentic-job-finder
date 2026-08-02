@@ -21,6 +21,8 @@
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
   button:disabled{opacity:.45;cursor:default}
+  .logo-btn{padding:4px;line-height:0;display:inline-flex;align-items:center;justify-content:center}
+  .logo-btn img{width:20px;height:20px;border-radius:4px;display:block}
   .status{margin-left:auto;color:var(--muted);font-size:12px}
   .dirty{color:var(--warn)}
   .saved{color:var(--good)}
@@ -72,6 +74,7 @@
           border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;resize:vertical}
   .rj-box textarea:focus{outline:none;border-color:var(--accent)}
   .rj-reasons{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+  .rj-err{color:var(--bad);font-size:12px;margin:-4px 0 10px}
   .rj-reason{border:1px solid var(--border);border-radius:14px;padding:4px 11px;font-size:12px;cursor:pointer;
              background:var(--panel2);color:var(--text);opacity:.75;transition:opacity .1s}
   .rj-reason:hover{opacity:1}
@@ -82,6 +85,14 @@
 <body>
 <header>
   <h1>Job Tracker</h1>
+  <button id="openSimplify" class="logo-btn" title="Simplify tracker — opens in the split pane"
+          aria-label="Open Simplify tracker">
+    <img src="https://simplify.jobs/favicon.ico" alt="">
+  </button>
+  <button id="openLinkedIn" class="logo-btn" title="LinkedIn job search — opens in the split pane"
+          aria-label="Open LinkedIn job search">
+    <img src="https://www.linkedin.com/favicon.ico" alt="">
+  </button>
   <button id="reconnect" class="primary" style="display:none">Reconnect files</button>
   <button id="openFolder" class="primary">Open folder…</button>
   <button id="openFiles">Open file(s)…</button>
@@ -97,7 +108,7 @@
 <div class="tabs" id="tabs"></div>
 <main id="main">
   <div class="empty">
-    <p>Open <code>shortlist.md</code> and <code>applied.md</code> to start.</p>
+    <p>Open <code>shortlist.md</code>, <code>applied.md</code>, <code>thoughts.md</code> and <code>manual.md</code> to start.</p>
     <p class="hint">Use “Open folder…” and grant access to the Job Search folder (recommended),
        or “Open file(s)…” to pick the markdown files directly.<br>
        Requires a Chromium browser (Chrome/Edge/Brave). Edits are written back surgically —
@@ -109,9 +120,10 @@
 <div id="rejectModal">
   <div class="rj-box">
     <h3 id="rjTitle">Reject role</h3>
-    <p class="rj-sub">Pick a reason and/or add a note. They're merged into the Comment.</p>
-    <textarea id="rjText" placeholder="why? (optional free text)"></textarea>
+    <p class="rj-sub">Pick a reason (required) and/or add a note. They're merged into the Comment.</p>
+    <textarea id="rjText" placeholder="why? (optional free text, but a reason chip is required)"></textarea>
     <div class="rj-reasons" id="rjReasons"></div>
+    <p class="rj-err" id="rjErr" style="display:none">Pick a reason above before confirming.</p>
     <div class="rj-actions">
       <button id="rjCancel">Cancel</button>
       <button id="rjConfirm" class="primary">Reject</button>
@@ -144,7 +156,7 @@ const REJECT_REASONS = [
   { code:"sketchy-site",   label:"sketchy site",    color:"#c44db0" },
   { code:"other",          label:"other",           color:"#6b7280" },
 ];
-let rejectCtx = null; // {f,row,tbl,ci} while the modal is open
+let rejectCtx = null; // {onConfirm(reasonCode, mergedComment), onCancel(), title, initialComment} while open
 
 // Tab Share integration
 const TAB_SHARE = "http://localhost:8766";
@@ -154,15 +166,120 @@ let partnerTabId = null;      // the split-partner tab to navigate
 
 function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = "status" + (cls?(" "+cls):""); }
 
+// Every row in every table (shortlist, Saved mirror, manual.md) is click-to-select-and-
+// preview, but a click on an interactive child (checkbox, reject button, comment box,
+// status dropdown, the Apply link) must NOT also trigger that. This existed as three
+// separate copies of the same guard, each hand-listing a different subset of tag names —
+// one was missing SELECT/OPTION (so clicking the Saved-table status dropdown wrongly
+// selected the row too), another was missing INPUT/TEXTAREA. One list now, used everywhere.
+const INTERACTIVE_TAGS = new Set(["BUTTON", "SELECT", "OPTION", "INPUT", "TEXTAREA"]);
+function isInteractiveClick(ev){
+  const t = ev.target;
+  return !!(t.closest("a") || INTERACTIVE_TAGS.has(t.tagName));
+}
+
+// Build a clickable [text](url)-style link cell, truncated for display but with the full
+// value in `title` (hover) and `href`. Was duplicated with slightly different truncation
+// lengths/fallbacks in the shortlist/Saved and manual renderers.
+function makeLinkCell(url, label){
+  const a = document.createElement("a");
+  a.href = url; a.target = "_blank"; a.rel = "noopener";
+  const text = label || url;
+  a.textContent = text.length > 60 ? text.slice(0, 57) + "..." : text;
+  a.title = url;
+  return a;
+}
+
+// ---------- small DOM builders shared by every page (shortlist/Applied, thoughts, manual,
+// the Saved mirror). Each of these existed as 3-5 near-identical inline copies before —
+// same element, same classes, different call site — which is exactly the kind of
+// duplication that makes a change (e.g. the "empty" placeholder's copy or styling) require
+// finding and editing every copy by hand.
+
+// The "nothing here yet" placeholder every page shows for an empty list/table.
+function makeEmptyNote(text){
+  const div = document.createElement("div");
+  div.className = "empty"; div.style.padding = "20px 0";
+  div.textContent = text;
+  return div;
+}
+
+// A page's section heading (bold divider line above its content).
+function makeSectionHeading(text){
+  const div = document.createElement("div");
+  div.className = "sec"; div.textContent = text;
+  return div;
+}
+
+// A page's explanatory blurb under its heading. `color` is used for the one warning-style
+// hint (missing Status column) that isn't muted body text.
+function makeHint(html, color){
+  const p = document.createElement("p");
+  p.className = "hint";
+  if (color) p.style.color = color;
+  p.innerHTML = html;
+  return p;
+}
+
+// The small "✕ remove this row" button used by thoughts/manual (delete the line outright,
+// as opposed to the shortlist's reject flow which keeps the row and marks it [nope]).
+function makeDeleteButton(title, onClick){
+  const btn = document.createElement("button");
+  btn.className = "rejbtn"; btn.textContent = "✕"; btn.title = title;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+// A <select> built from [[value,label],...] pairs, with a `paint()` callback re-run after
+// every change to keep a status-driven CSS class (e.g. the "ok"/"bad" badge coloring) in
+// sync. Returns the <select> — callers still own the `change` handler's actual write.
+function makeStatusSelect(options, initialValue, paint){
+  const sel = document.createElement("select");
+  sel.style.cssText = "appearance:none;-webkit-appearance:none;cursor:pointer;font-size:11px;padding:2px 8px;font-family:inherit;text-align:center";
+  for (const [value, label] of options){
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    sel.appendChild(o);
+  }
+  sel.value = initialValue;
+  if (paint) paint(sel);
+  return sel;
+}
+
+// Wire a table row as click-to-preview (opens `url` in the split pane), guarding against
+// clicks on interactive children per `isInteractiveClick`. Shared by every table view.
+function makeRowClickable(tr, url){
+  if (!url) return;
+  tr.dataset.url = url;
+  tr.style.cursor = "pointer";
+  tr.addEventListener("click", ev => {
+    if (isInteractiveClick(ev)) return;
+    selectRow(tr, url);
+  });
+}
+
 // ---------- markdown table parsing ----------
 const SEP_RE = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/;
 const isRow = l => { const s=l.trim(); return s.startsWith("|") && s.endsWith("|"); };
 
-// split a "| a | b |" row into trimmed cell strings (drops leading/trailing empties from the outer pipes)
+// split a "| a | b |" row into trimmed cell strings (drops leading/trailing empties from
+// the outer pipes). Splits on UNESCAPED pipes only — matches md_tables.split_cells /
+// parse_tracker.split_md_row on the Python side. A literal pipe in a cell (a
+// multi-location job like "Toronto | Vancouver") is written as `\|`; splitting on every
+// `|` tore a row like that into an extra column and shifted everything after it. This bug
+// existed independently on both sides until the Python one was found and fixed; this is
+// the JS half of the same fix, kept in sync by hand since there's no shared runtime.
 function splitCells(line){
   const t = line.trim();
   const inner = t.slice(1, t.length-1); // strip outer pipes
-  return inner.split("|").map(c => c.trim());
+  return inner.split(/(?<!\\)\|/).map(c => c.trim());
+}
+
+// Escape a value for a single-line, pipe-delimited markdown cell — the JS counterpart of
+// md_tables.esc / parse_tracker.esc. Idempotent on the pipe so a value read from a cell
+// (which keeps its escaped form) and written back stays stable.
+function escCell(s){
+  return String(s == null ? "" : s).replace(/\r?\n/g, " ").replace(/(?<!\\)\|/g, "\\|").trim();
 }
 
 // Parse all tables in a file's lines. Returns array of tables:
@@ -220,6 +337,8 @@ function render(){
   mainEl.innerHTML = "";
   const f = files.get(activeName);
   if (!f){ mainEl.innerHTML = '<div class="empty">No file selected.</div>'; return; }
+  if (activeName === "thoughts.md"){ renderThoughts(f); return; }
+  if (activeName === "manual.md"){ renderManual(f); return; }
   if (!f.tables.length){ mainEl.innerHTML = '<div class="empty">No tables found in this file.</div>'; return; }
 
   let lastSection = null;
@@ -253,8 +372,7 @@ function render(){
         tr.dataset.url = url;
         tr.addEventListener("click", ev=>{
           // don't hijack real clicks on links, checkboxes, buttons, or the comment box
-          const t = ev.target;
-          if (t.closest("a") || t.tagName==="INPUT" || t.tagName==="TEXTAREA" || t.tagName==="BUTTON") return;
+          if (isInteractiveClick(ev)) return;
           selectRow(tr, url);
         });
       }
@@ -284,7 +402,17 @@ function render(){
               commitRow(f,row,tbl);
               render();
             } else {
-              openRejectModal(f,row,tbl,ci);
+              const roleCol = tbl.headers.findIndex(h=>h.toLowerCase()==="role");
+              openRejectModal({
+                title: "Reject: " + (roleCol>=0 ? row.cells[roleCol] : "role"),
+                initialComment: tbl.commentCol!=null ? (row.cells[tbl.commentCol]||"") : "",
+                onConfirm: (_code, merged) => {
+                  row.cells[ci] = "[nope]";
+                  if (tbl.commentCol!=null) row.cells[tbl.commentCol] = merged;
+                  commitRow(f,row,tbl);
+                  render();
+                },
+              });
             }
           });
           td.appendChild(rej);
@@ -315,6 +443,466 @@ function render(){
 // A status cell is "rejected" when it holds [nope] (case-insensitive).
 function isRejected(cell){ return /\[\s*nope\s*\]/i.test(cell || ""); }
 
+// ---------- thoughts.md editor (bullet list, not a table) ----------
+const BULLET_RE = /^(\s*)[-*]\s+(.*)$/;
+
+// Return [{lineIdx, text}] for every bullet line in the file (heading/prose untouched).
+function parseThoughts(lines){
+  const out = [];
+  for (let i=0;i<lines.length;i++){
+    const m = lines[i].match(BULLET_RE);
+    if (m) out.push({ lineIdx:i, text:m[2] });
+  }
+  return out;
+}
+
+function addThought(f, text){
+  const clean = text.replace(/\r?\n/g," ").trim();
+  if (!clean) return;
+  const bullets = parseThoughts(f.lines);
+  const line = "- " + clean;
+  if (bullets.length){
+    f.lines.splice(bullets[bullets.length-1].lineIdx + 1, 0, line); // after last bullet
+  } else {
+    while (f.lines.length && f.lines[f.lines.length-1].trim()==="") f.lines.pop(); // drop trailing blanks
+    if (f.lines.length) f.lines.push("");
+    f.lines.push(line);
+  }
+  f.dirty = true; updateDirtyUI();
+  f.tables = parseTables(f.lines);
+  render();
+  const box = document.getElementById("thoughtsAdd");
+  if (box) box.focus();
+}
+
+function renderThoughts(f){
+  mainEl.innerHTML = "";
+
+  mainEl.appendChild(makeSectionHeading("Thoughts / afterthoughts"));
+  mainEl.appendChild(makeHint("Jot remarks here as you review roles. Before the next search pass, Kiro folds these into <code>job-search-prefs.md</code> and empties the list. Save to write to disk."));
+
+  // add box
+  const addWrap = document.createElement("div");
+  addWrap.style.cssText = "display:flex;gap:8px;align-items:flex-start;margin:10px 0 18px";
+  const ta = document.createElement("textarea");
+  ta.id = "thoughtsAdd";
+  ta.className = "cmt"; ta.rows = 2; ta.style.flex = "1";
+  ta.placeholder = "add a remark…  (Ctrl/Cmd+Enter)";
+  const addBtn = document.createElement("button");
+  addBtn.className = "primary"; addBtn.textContent = "Add remark";
+  const doAdd = () => { addThought(f, ta.value); ta.value = ""; ta.focus(); };
+  addBtn.addEventListener("click", doAdd);
+  ta.addEventListener("keydown", e => {
+    if (e.key==="Enter" && (e.ctrlKey||e.metaKey)){ e.preventDefault(); doAdd(); }
+  });
+  addWrap.appendChild(ta); addWrap.appendChild(addBtn);
+  mainEl.appendChild(addWrap);
+
+  // existing bullets
+  const bullets = parseThoughts(f.lines);
+  if (!bullets.length){
+    mainEl.appendChild(makeEmptyNote("No remarks yet. Add one above."));
+    return;
+  }
+
+  const list = document.createElement("table");
+  const tbody = document.createElement("tbody");
+  bullets.forEach(b => {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "default";
+
+    const tdText = document.createElement("td");
+    const bta = document.createElement("textarea");
+    bta.className = "cmt"; bta.rows = 1; bta.value = b.text;
+    bta.addEventListener("input", () => {
+      const v = bta.value.replace(/\r?\n/g," ").trim();
+      f.lines[b.lineIdx] = "- " + v;
+      bta.classList.add("edited");
+      f.dirty = true; updateDirtyUI();
+    });
+    tdText.appendChild(bta);
+
+    const tdDel = document.createElement("td");
+    tdDel.className = "chk";
+    tdDel.appendChild(makeDeleteButton("Delete remark", () => {
+      f.lines.splice(b.lineIdx, 1);
+      f.dirty = true; updateDirtyUI();
+      f.tables = parseTables(f.lines);
+      render();
+    }));
+
+    tr.appendChild(tdText); tr.appendChild(tdDel);
+    tbody.appendChild(tr);
+  });
+  list.appendChild(tbody);
+  mainEl.appendChild(list);
+}
+
+// ---------- manual.md editor (URL additions) ----------
+const MD_LINK_RE = /^\[([^\]]*)\]\(<(.*?)>\)$/;
+const MD_LINK_RE2 = /^\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/;
+function parseUrlCell(raw){
+  let m = raw.trim().match(MD_LINK_RE);
+  if (m) return { url: m[2], title: m[1] };
+  m = raw.trim().match(MD_LINK_RE2);
+  if (m) return { url: m[2], title: m[1] };
+  return { url: raw, title: null };
+}
+
+function parseManualEntries(lines){
+  const tables = parseTables(lines);
+  if (!tables.length) return [];
+  const tbl = tables[0];
+  return tbl.rows.map(r => {
+    const { url, title } = parseUrlCell(r.cells[1] || "");
+    return {
+      lineIdx: r.lineIdx,
+      cells: r.cells,
+      added: r.cells[0] || "",
+      url, title,
+      status: r.cells[2] || "",
+    };
+  });
+}
+
+async function fetchPageTitle(url){
+  try{
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const html = await r.text();
+    const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    return m ? m[1].trim() : null;
+  }catch{ return null; }
+}
+
+function addManualEntry(f, url, status, title){
+  const clean = url.replace(/\r?\n/g," ").trim();
+  if (!clean) return;
+  const today = new Date().toISOString().slice(0,10);
+  const safeTitle = title ? title.replace(/\[/g,"(").replace(/\]/g,")").replace(/\|/g,"-") : null;
+  const escUrl = clean.replace(/\|/g,"%7C");
+  const urlCell = safeTitle
+    ? `[${safeTitle}](<${escUrl}>)`
+    : escUrl;
+  const newLine = `| ${today} | ${urlCell} | ${status} |`;
+  // Find the entries table: insert after the separator row
+  const tables = parseTables(f.lines);
+  if (tables.length){
+    const tbl = tables[0];
+    // Insert after the last data row, or after the separator if empty
+    const insertIdx = tbl.rows.length ? tbl.rows[tbl.rows.length-1].lineIdx + 1 : tbl.headerIdx + 2;
+    f.lines.splice(insertIdx, 0, newLine);
+  } else {
+    // Fallback: append at end
+    f.lines.push(newLine);
+  }
+  f.dirty = true; updateDirtyUI();
+  f.tables = parseTables(f.lines);
+  render();
+}
+
+function renderManual(f){
+  mainEl.innerHTML = "";
+
+  mainEl.appendChild(makeSectionHeading("Manual URL additions"));
+  mainEl.appendChild(makeHint("Add URLs here for roles you applied to or saved outside Simplify. On the next sync, Kiro will fetch the title, add them to <code>shortlist.md</code> or <code>applied.md</code>, and remove them from this list."));
+
+  // Add URL form
+  const addWrap = document.createElement("div");
+  addWrap.style.cssText = "display:flex;gap:8px;align-items:flex-end;margin:10px 0 18px;flex-wrap:wrap";
+
+  const urlWrap = document.createElement("div");
+  urlWrap.style.cssText = "flex:1;min-width:200px";
+  const urlLabel = document.createElement("label");
+  urlLabel.style.cssText = "font-size:12px;color:var(--muted);display:block;margin-bottom:2px";
+  urlLabel.textContent = "Job URL";
+  const urlInput = document.createElement("input");
+  urlInput.type = "url";
+  urlInput.id = "manualUrl";
+  urlInput.className = "cmt";
+  urlInput.style.cssText = "width:100%;min-height:auto;padding:7px";
+  urlInput.placeholder = "https://boards.greenhouse.io/...";
+  urlWrap.appendChild(urlLabel);
+  urlWrap.appendChild(urlInput);
+
+  const statusWrap = document.createElement("div");
+  const statusLabel = document.createElement("label");
+  statusLabel.style.cssText = "font-size:12px;color:var(--muted);display:block;margin-bottom:2px";
+  statusLabel.textContent = "Status";
+  const statusSel = document.createElement("select");
+  statusSel.id = "manualStatus";
+  statusSel.style.cssText = "background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font:inherit;cursor:pointer";
+  const optApplied = document.createElement("option");
+  optApplied.value = "applied"; optApplied.textContent = "Applied";
+  const optSaved = document.createElement("option");
+  optSaved.value = "saved"; optSaved.textContent = "Saved";
+  statusSel.appendChild(optApplied);
+  statusSel.appendChild(optSaved);
+  statusWrap.appendChild(statusLabel);
+  statusWrap.appendChild(statusSel);
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "primary"; addBtn.textContent = "Add URL";
+  const doAdd = async () => {
+    const url = urlInput.value;
+    const status = statusSel.value;
+    const title = await fetchPageTitle(url);
+    addManualEntry(f, url, status, title);
+    urlInput.value = ""; urlInput.focus();
+  };
+  addBtn.addEventListener("click", doAdd);
+  urlInput.addEventListener("keydown", e => {
+    if (e.key==="Enter"){ e.preventDefault(); doAdd(); }
+  });
+
+  // Button to grab URL from split-partner tab and add it immediately
+  const grabBtn = document.createElement("button");
+  grabBtn.textContent = "Add split tab";
+  grabBtn.title = "Grab URL from the split-pane tab and add it as a new entry";
+  grabBtn.addEventListener("click", async () => {
+    await detectSplitPartner();
+    if (partnerTabId == null){
+      alert("No split pane detected. Split this tab first (right-click → Split tab), then retry.");
+      return;
+    }
+    try{
+      const r = await fetch(TAB_SHARE + "/tabs", { cache: "no-store" });
+      const data = await r.json();
+      const partner = (data.tabs || []).find(t => t.id === partnerTabId);
+      if (partner && partner.url){
+        addManualEntry(f, partner.url, statusSel.value, partner.title || null);
+        urlInput.value = ""; urlInput.focus();
+      } else {
+        alert("Could not read the split-partner tab URL.");
+      }
+    }catch(e){
+      alert("Tab Share error: " + e.message);
+    }
+  });
+
+  addWrap.appendChild(urlWrap);
+  addWrap.appendChild(statusWrap);
+  addWrap.appendChild(addBtn);
+  addWrap.appendChild(grabBtn);
+  mainEl.appendChild(addWrap);
+
+  // Existing entries
+  const entries = parseManualEntries(f.lines);
+  if (!entries.length){
+    mainEl.appendChild(makeEmptyNote("No manual entries yet. Add a URL above."));
+    renderSavedMirror();
+    return;
+  }
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  ["Added","URL","Status"].forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    htr.appendChild(th);
+  });
+  const thDel = document.createElement("th"); thDel.textContent = ""; thDel.style.width = "40px";
+  htr.appendChild(thDel);
+  thead.appendChild(htr); table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  entries.forEach(entry => {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    makeRowClickable(tr, entry.url);
+
+    // Added
+    const tdDate = document.createElement("td");
+    tdDate.textContent = entry.added;
+    tr.appendChild(tdDate);
+
+    // URL (clickable)
+    const tdUrl = document.createElement("td");
+    if (entry.url){
+      tdUrl.appendChild(makeLinkCell(entry.url, entry.title));
+    }
+    tr.appendChild(tdUrl);
+
+    // Status (editable — toggle between saved/applied)
+    const tdStatus = document.createElement("td");
+    const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok" : ""); };
+    const sel = makeStatusSelect(
+      [["saved", "saved"], ["applied", "applied"]], entry.status, paint);
+    sel.addEventListener("change", ev => {
+      ev.stopPropagation();
+      paint(sel);
+      const newCells = [...entry.cells];
+      newCells[2] = sel.value;
+      f.lines[entry.lineIdx] = rebuildLine(newCells);
+      f.dirty = true;
+      updateDirtyUI();
+    });
+    tdStatus.appendChild(sel);
+    tr.appendChild(tdStatus);
+
+    // Delete button
+    const tdDel = document.createElement("td");
+    tdDel.className = "chk";
+    tdDel.appendChild(makeDeleteButton("Remove entry", () => {
+      f.lines.splice(entry.lineIdx, 1);
+      f.dirty = true; updateDirtyUI();
+      f.tables = parseTables(f.lines);
+      render();
+    }));
+    tr.appendChild(tdDel);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  mainEl.appendChild(table);
+
+  renderSavedMirror();
+}
+
+// ---------- Simplify Saved (from applied.md) — the single copy of that list ----------
+// The Status cell is TRANSIENT intent, not stored state: the next `saved_sync` run reads
+// it, pushes it to Simplify (mark-applied / delete), records the outcome, and rebuilds this
+// table. Nothing here talks to Simplify directly — the browser only records what you want.
+function renderSavedMirror(){
+  const applied = files.get("applied.md");
+
+  mainEl.appendChild(makeSectionHeading("Simplify Saved"));
+  mainEl.appendChild(makeHint("The Saved list from Simplify, mirrored in <code>applied.md</code>. Set a row to <b>applied</b> or <b>rejected</b> and the next sync pushes it: applied marks it applied on Simplify, rejected deletes it there and files the reason in <code>## Rejected</code>. Rejecting opens the reason picker — a reason is required, same as on the shortlist. Rows left as <b>saved</b> are untouched. Anything saved for more than 2 months is auto-rejected."));
+
+  if (!applied){
+    mainEl.appendChild(makeEmptyNote("applied.md is not open — open the job-search folder to see Saved rows."));
+    return;
+  }
+  const tbl = (applied.tables || []).find(t => /saved/i.test(t.sectionTitle || ""));
+  if (!tbl){
+    mainEl.appendChild(makeEmptyNote("No '## Saved' table in applied.md."));
+    return;
+  }
+  if (!tbl.rows.length){
+    mainEl.appendChild(makeEmptyNote("No saved (not yet applied) rows."));
+    return;
+  }
+
+  const ci = name => tbl.headers.findIndex(h => h.trim().toLowerCase() === name);
+  const ciRole = ci("role");
+  const ciApply = ci("apply");
+  const ciStatus = ci("status");
+  const ciComment = ci("comment");
+  const ciSimplify = ci("simplify");
+
+  if (ciStatus < 0){
+    mainEl.appendChild(makeHint(
+      "applied.md's Saved table has no Status column — run: parse_tracker.py --migrate-schema --md applied.md",
+      "var(--bad)"));
+  }
+
+  // The Comment column (the rejection reason, e.g. "not-interested — pay too low") is
+  // set once via the reject dialog's required reason chip, not typed here — so it's
+  // hidden by default and only shown alongside the "show rejected" toggle, matching how
+  // rejected rows in every other table are hidden-but-not-deleted until you ask to see them.
+  const headers = ["Saved","Role","Status"];
+  if (showRejected) headers.push("Comment");
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  headers.forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr); table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  tbl.rows.forEach(row => {
+    const tr = document.createElement("tr");
+    const { url } = parseUrlCell(ciApply >= 0 ? (row.cells[ciApply] || "") : "");
+    makeRowClickable(tr, url);
+
+    const tdDate = document.createElement("td");
+    tdDate.textContent = row.cells[0] || "";
+    tr.appendChild(tdDate);
+
+    const tdRole = document.createElement("td");
+    const roleText = (ciRole >= 0 ? (row.cells[ciRole] || "") : "").trim();
+    if (url){
+      tdRole.appendChild(makeLinkCell(url, roleText));
+    } else {
+      tdRole.textContent = roleText;
+    }
+    // A row with no Simplify id can't be pushed; say so where the user is deciding.
+    const hasId = ciSimplify >= 0 && /tracker\?id=/.test(row.cells[ciSimplify] || "");
+    if (!hasId){
+      const note = document.createElement("span");
+      note.className = "badge";
+      note.style.cssText = "margin-left:6px;font-size:10px";
+      note.textContent = "no id";
+      note.title = "No Simplify tracker id captured for this row, so a status change can't be pushed. The next sync captures it.";
+      tdRole.appendChild(note);
+    }
+    tr.appendChild(tdRole);
+
+    // Status — the editable intent cell
+    const tdStatus = document.createElement("td");
+    const cur = (ciStatus >= 0 ? (row.cells[ciStatus] || "") : "").trim().toLowerCase();
+    const initial = (cur === "applied" || cur === "rejected") ? cur : "";
+    const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok"
+                                                  : s.value === "rejected" ? " bad" : ""); };
+    const sel = makeStatusSelect(
+      [["", "saved"], ["applied", "applied"], ["rejected", "rejected"]], initial, paint);
+    let lastCommitted = sel.value; // tracks the last value actually written, for cancel-revert
+    if (ciStatus < 0) sel.disabled = true;
+
+    const writeCell = (idx, value) => {
+      if (idx < 0) return;
+      const cells = [...row.cells];
+      while (cells.length <= idx) cells.push("");
+      cells[idx] = value;
+      row.cells = cells;
+      applied.lines[row.lineIdx] = rebuildLine(cells);
+      applied.dirty = true;
+      updateDirtyUI();
+    };
+
+    sel.addEventListener("change", ev => {
+      ev.stopPropagation();
+      if (sel.value === "rejected"){
+        // A rejection needs a reason chip, same requirement and same modal as the
+        // shortlist flow — see openRejectModal's comment for why it's mandatory.
+        openRejectModal({
+          title: "Reject: " + roleText,
+          initialComment: ciComment >= 0 ? (row.cells[ciComment] || "") : "",
+          onConfirm: (_code, merged) => {
+            writeCell(ciStatus, "rejected");
+            if (ciComment >= 0) writeCell(ciComment, merged);
+            sel.value = "rejected"; lastCommitted = "rejected"; paint(sel);
+          },
+          onCancel: () => { sel.value = lastCommitted; paint(sel); },
+        });
+      } else {
+        paint(sel);
+        writeCell(ciStatus, sel.value);
+        lastCommitted = sel.value;
+      }
+    });
+    tdStatus.appendChild(sel);
+    tr.appendChild(tdStatus);
+
+    if (showRejected){
+      // Read-only here on purpose: the reason is set through the reject dialog (which
+      // enforces picking a chip), not free-typed in the table — this is just a way to
+      // review what got recorded.
+      const tdCmt = document.createElement("td");
+      tdCmt.textContent = ciComment >= 0 ? (row.cells[ciComment] || "") : "";
+      tr.appendChild(tdCmt);
+    }
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  mainEl.appendChild(table);
+}
+
 // ---------- reject dialog ----------
 let rjSelectedReason = null;
 
@@ -333,6 +921,7 @@ function buildReasonButtons(){
         return;
       }
       rjSelectedReason=r.code;
+      $("#rjErr").style.display = "none";
       [...wrap.children].forEach(c=>{c.classList.remove("sel");c.style.background="var(--panel2)";});
       b.classList.add("sel"); b.style.background=r.color+"33";
     });
@@ -340,14 +929,18 @@ function buildReasonButtons(){
   });
 }
 
-function openRejectModal(f,row,tbl,ci){
-  rejectCtx = {f,row,tbl,ci};
+// Shared by both reject flows (shortlist [nope] and the Saved-table Status dropdown).
+// A reason chip is REQUIRED to confirm: an unlabeled rejection defaults to a judgment
+// call ("not-interested") in the sync scripts, which makes the role permanently
+// un-suggestable — too consequential to fall out of silence. Free text stays optional.
+//
+// ctx: { title, initialComment, onConfirm(code, mergedComment), onCancel() }
+function openRejectModal(ctx){
+  rejectCtx = ctx;
   rjSelectedReason = null;
-  // prefill textarea from an existing comment (minus any leading reason code)
-  const existing = tbl.commentCol!=null ? (row.cells[tbl.commentCol]||"") : "";
-  const roleCol = tbl.headers.findIndex(h=>h.toLowerCase()==="role");
-  $("#rjTitle").textContent = "Reject: " + (roleCol>=0 ? row.cells[roleCol] : "role");
-  $("#rjText").value = existing;
+  $("#rjTitle").textContent = ctx.title;
+  $("#rjText").value = ctx.initialComment || "";
+  $("#rjErr").style.display = "none";
   buildReasonButtons();
   $("#rejectModal").classList.add("show");
   setTimeout(()=>$("#rjText").focus(), 30);
@@ -355,23 +948,26 @@ function openRejectModal(f,row,tbl,ci){
 
 function closeRejectModal(){
   $("#rejectModal").classList.remove("show");
+  const ctx = rejectCtx;
   rejectCtx = null; rjSelectedReason = null;
+  if (ctx && ctx.onCancel) ctx.onCancel();
 }
 
 function confirmReject(){
   if (!rejectCtx) return;
-  const {f,row,tbl,ci} = rejectCtx;
+  if (!rjSelectedReason){
+    $("#rjErr").style.display = "block";
+    return;
+  }
+  const { onConfirm } = rejectCtx;
   const txt = $("#rjText").value.replace(/\r?\n/g," ").trim();
-  // merge: "<reason> — <text>" (either part optional)
-  let merged = "";
-  if (rjSelectedReason && txt) merged = rjSelectedReason + " — " + txt;
-  else if (rjSelectedReason) merged = rjSelectedReason;
-  else merged = txt;
-  row.cells[ci] = "[nope]";
-  if (tbl.commentCol!=null) row.cells[tbl.commentCol] = merged;
-  commitRow(f,row,tbl);
-  closeRejectModal();
-  render();
+  const code = rjSelectedReason;
+  const merged = txt ? (code + " — " + txt) : code;
+  // Clear state before onConfirm runs: it typically calls render(), and closeRejectModal's
+  // onCancel must not fire for a confirmed reject.
+  rejectCtx = null; rjSelectedReason = null;
+  $("#rejectModal").classList.remove("show");
+  onConfirm(code, merged);
 }
 
 $("#rjCancel").addEventListener("click", closeRejectModal);
@@ -484,8 +1080,14 @@ async function initTabShare(){
 }
 
 // ---------- surgical edit: rebuild only the changed line ----------
+// escCell here (not at each call site) is the one place free-typed cell text turns back
+// into a markdown row, so a user typing a literal "|" (e.g. a comment "too far | pass")
+// can't corrupt the row's column count on save — see splitCells' comment for the read side
+// of this same bug. Cells that are already-composed markdown (status boxes like "[x]",
+// or an "[Apply](url)" link built by this file) never contain an unescaped "|" to begin
+// with, so re-escaping them is a no-op.
 function rebuildLine(cells){
-  return "| " + cells.join(" | ") + " |";
+  return "| " + cells.map(escCell).join(" | ") + " |";
 }
 function commitRow(f,row,tbl){
   f.lines[row.lineIdx] = rebuildLine(row.cells);
@@ -646,17 +1248,20 @@ function afterLoad(){
 }
 
 // ---------- entry points ----------
+$("#openSimplify").addEventListener("click", ()=>openInSplit("https://simplify.jobs/tracker"));
+$("#openLinkedIn").addEventListener("click", ()=>openInSplit("https://www.linkedin.com/jobs/"));
+
 $("#openFolder").addEventListener("click", async ()=>{
   if (!window.showDirectoryPicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave, or use “Open file(s)…”."); return; }
   try{
     const dir = await window.showDirectoryPicker({ mode:"readwrite" });
     files.clear(); activeName=null;
     for await (const [n,h] of dir.entries()){
-      if (h.kind==="file" && /\.md$/i.test(n) && (n==="shortlist.md"||n==="applied.md")){
+      if (h.kind==="file" && /\.md$/i.test(n) && (n==="shortlist.md"||n==="applied.md"||n==="thoughts.md"||n==="manual.md")){
         await loadHandle(h);
       }
     }
-    if (!files.size){ setStatus("No shortlist.md / applied.md found in that folder."); return; }
+    if (!files.size){ setStatus("No shortlist.md / applied.md / thoughts.md found in that folder."); return; }
     afterLoad();
     await persistHandles();
     $("#reconnect").style.display="none";

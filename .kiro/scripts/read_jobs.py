@@ -3,12 +3,16 @@
 Targets the sections that matter: Responsibilities / "What you'll do" and
 Qualifications / Requirements / "What you bring" (names vary), plus level/experience
 signals. Usage: read_jobs.py <id1> <id2> ..."""
-import json,urllib.request,time,sys,re
+import time,sys,re
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import tab_share as TS
 
 POOL=5
 def post(p,b,t=35):
-    try: return json.load(urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8766"+p,data=json.dumps(b).encode(),headers={"Content-Type":"application/json"}),timeout=t))
-    except Exception as e: return {"error":str(e)}
+    resp, err = TS.post_raw(p,b,timeout=t)
+    return {"error": err} if err else resp
 
 def chunks(l,n):
     for i in range(0,len(l),n): yield l[i:i+n]

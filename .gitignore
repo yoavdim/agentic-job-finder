@@ -13,6 +13,8 @@ my info/
 # Only shortlist.sample.md / applied.sample.md are committed (fictional demo data).
 /shortlist.md
 /applied.md
+/thoughts.md
+/manual.md
 
 # ---- Python ----
 __pycache__/
@@ -30,6 +32,11 @@ env/
 # ---- OS ----
 .DS_Store
 Thumbs.db
+
+# ---- pre-apply snapshots of the (gitignored) data files ----
+# The scripts back up shortlist.md/applied.md/etc before every destructive write, since
+# git is not an undo for them. Same personal data, so never committed.
+.kiro/backups/
 
 # ---- scratch / temp ----
 *.tmp
