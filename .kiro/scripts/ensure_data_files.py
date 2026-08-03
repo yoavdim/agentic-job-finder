@@ -35,6 +35,20 @@ Roles found and applied/saved outside Simplify, captured via `tracker.html` as a
 |---|---|---|
 """
 
+# Companies to periodically check for new openings, added via tracker.html's chip strip
+# (shown above manual.md, never its own tab). CSS Selector is reserved for future scraping
+# and unused for now — kept in the schema so no migration is needed when that lands.
+WATCHLIST_SKELETON = """# Company Watchlist
+
+Companies to periodically check for new openings — added via `tracker.html`. CSS
+selector is reserved for future scraping; unused for now.
+
+## Companies
+
+| Added | Company | URL | CSS Selector |
+|---|---|---|---|
+"""
+
 APPLIED_SKELETON = """# Applied / In-Motion Tracker — Yoav Dim
 
 Synced from the Simplify tracker (simplify.jobs/tracker). Keep updated so future searches skip these (dedup against this + shortlist Excluded).
@@ -115,7 +129,7 @@ can still have a role that fits.
 
 
 def missing_skeletons(thoughts_path, manual_path, applied_path, shortlist_path=None,
-                      date=None):
+                      date=None, watchlist_path=None):
     """Return {Path: skeleton-text} for every data file that doesn't exist yet."""
     date = date or today()
     wanted = [(Path(thoughts_path), THOUGHTS_SKELETON),
@@ -124,6 +138,8 @@ def missing_skeletons(thoughts_path, manual_path, applied_path, shortlist_path=N
     if shortlist_path is not None:
         wanted.append((Path(shortlist_path),
                        SHORTLIST_SKELETON.format(date=date, tier=TIER_TABLE)))
+    if watchlist_path is not None:
+        wanted.append((Path(watchlist_path), WATCHLIST_SKELETON))
     out = {}
     for p, skeleton in wanted:
         if not p.exists():
@@ -138,16 +154,17 @@ def main():
     ap.add_argument("--thoughts", default="thoughts.md")
     ap.add_argument("--manual", default="manual.md")
     ap.add_argument("--shortlist", default="shortlist.md")
+    ap.add_argument("--watchlist", default="watchlist.md")
     ap.add_argument("--date", default=today())
     ap.add_argument("--apply", action="store_true", help="write skeletons for missing files")
     ap.add_argument("--json", help="write the report as JSON here ('-' = stdout)")
     args = ap.parse_args()
 
     missing = missing_skeletons(args.thoughts, args.manual, args.applied, args.shortlist,
-                               args.date)
+                               args.date, args.watchlist)
     missing_str = [str(p) for p in missing]
     wanted = [str(Path(args.thoughts)), str(Path(args.manual)), str(Path(args.applied)),
-              str(Path(args.shortlist))]
+              str(Path(args.shortlist)), str(Path(args.watchlist))]
     existing = [p for p in wanted if p not in missing_str]
 
     created = []

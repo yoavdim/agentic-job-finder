@@ -26,8 +26,8 @@
   .status{margin-left:auto;color:var(--muted);font-size:12px}
   .dirty{color:var(--warn)}
   .saved{color:var(--good)}
-  .tabs{display:flex;gap:6px;padding:8px 16px 0}
-  .tabs button{border-bottom-left-radius:0;border-bottom-right-radius:0}
+  .tabs{display:flex;gap:6px;padding:8px 16px 0;border-bottom:1px solid var(--border)}
+  .tabs button{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:-1px}
   .tabs button.active{background:var(--panel);border-color:var(--border);border-bottom-color:var(--panel)}
 
   main{padding:0 16px 60px}
@@ -62,6 +62,30 @@
   .hint{color:var(--muted);font-size:12px;margin:4px 0 0}
   code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
 
+  /* company watchlist chip strip (shown above manual.md) */
+  .watchwrap{position:relative;margin:16px 0 22px;padding:6px 0}
+  .chiprow{position:relative;display:flex;align-items:center;gap:8px}
+  .chip-add{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;
+        border-radius:50%;border:1px solid var(--border);background:var(--panel2);color:var(--text);
+        cursor:pointer;font-size:17px;line-height:1;z-index:2}
+  .chip-add:hover{border-color:var(--accent);color:var(--accent)}
+  .chipstrip{flex:1;display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;
+        padding:2px 2px 6px;scrollbar-width:none}
+  .chipstrip::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;background:var(--panel2);
+        border:1px solid var(--border);border-radius:14px;padding:5px 6px 5px 12px;font-size:13px;
+        cursor:pointer;white-space:nowrap}
+  .chip:hover{border-color:var(--accent)}
+  .chip .chip-del{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;
+        padding:2px 5px;line-height:1;border-radius:50%}
+  .chip .chip-del:hover{color:#e0585a}
+  .chip-empty{color:var(--muted);font-size:13px;padding:6px 4px}
+  /* left/right scroll nubs, only shown (via JS) when the strip actually overflows */
+  .chip-scroll{flex:0 0 auto;display:none;align-items:center;justify-content:center;width:26px;height:26px;
+        border-radius:50%;border:1px solid var(--border);background:var(--panel2);color:var(--muted);
+        cursor:pointer;font-size:13px;z-index:2}
+  .chip-scroll:hover{border-color:var(--accent);color:var(--accent)}
+
   /* reject dialog */
   #rejectModal{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
                background:rgba(0,0,0,.55)}
@@ -95,7 +119,6 @@
   </button>
   <button id="reconnect" class="primary" style="display:none">Reconnect files</button>
   <button id="openFolder" class="primary">Open folder…</button>
-  <button id="openFiles">Open file(s)…</button>
   <button id="save" disabled>Save changes</button>
   <button id="reload" disabled>Reload from disk</button>
   <button id="forget" style="display:none" title="Clear remembered files">Forget</button>
@@ -109,8 +132,7 @@
 <main id="main">
   <div class="empty">
     <p>Open <code>shortlist.md</code>, <code>applied.md</code>, <code>thoughts.md</code> and <code>manual.md</code> to start.</p>
-    <p class="hint">Use “Open folder…” and grant access to the Job Search folder (recommended),
-       or “Open file(s)…” to pick the markdown files directly.<br>
+    <p class="hint">Click “Open folder…” and grant access to the Job Search folder.<br>
        Requires a Chromium browser (Chrome/Edge/Brave). Edits are written back surgically —
        only the checkbox and comment cells you touch are modified.<br>
        Click any row to open its link in the Chrome split pane beside this tab.</p>
@@ -223,9 +245,9 @@ function makeHint(html, color){
 
 // The small "✕ remove this row" button used by thoughts/manual (delete the line outright,
 // as opposed to the shortlist's reject flow which keeps the row and marks it [nope]).
-function makeDeleteButton(title, onClick){
+function makeDeleteButton(title, onClick, className){
   const btn = document.createElement("button");
-  btn.className = "rejbtn"; btn.textContent = "✕"; btn.title = title;
+  btn.className = className || "rejbtn"; btn.textContent = "✕"; btn.title = title;
   btn.addEventListener("click", onClick);
   return btn;
 }
@@ -600,9 +622,172 @@ function addManualEntry(f, url, status, title){
   f.tables = parseTables(f.lines);
   render();
 }
+// ---------- company watchlist (watchlist.md) — chip strip shown above manual.md ----------
+// Schema: | Added | Company | URL | CSS Selector |. Selector column is unused for now.
+
+// Hostname labels to drop when deriving a display name (job boards, ATS subdomains) and
+// trailing TLD-like labels (e.g. "acme.com" -> ["acme"]).
+const WATCHLIST_STRIP_LABELS = new Set(["www","jobs","job","career","careers","glassdoor","myworkdayjobs"]);
+const WATCHLIST_TLD_RE = /^(com|org|net|io|co|ca|us|uk|dev|app|jobs|careers|company|inc)$/i;
+
+function deriveCompanyName(url){
+  let host;
+  try{ host = new URL(url).hostname; }catch{ return url; }
+  let labels = host.split(".").filter(Boolean);
+  while (labels.length > 1 && WATCHLIST_TLD_RE.test(labels[labels.length-1])) labels.pop();
+  const kept = labels.filter(l => !WATCHLIST_STRIP_LABELS.has(l.toLowerCase()));
+  return (kept.length ? kept : labels).map(l => l[0].toUpperCase() + l.slice(1)).join(" ");
+}
+
+function parseWatchlistEntries(lines){
+  const tables = parseTables(lines);
+  if (!tables.length) return [];
+  const tbl = tables[0];
+  return tbl.rows.map(r => ({
+    lineIdx: r.lineIdx,
+    cells: r.cells,
+    added: r.cells[0] || "",
+    company: r.cells[1] || "",
+    url: r.cells[2] || "",
+    selector: r.cells[3] || "",
+  }));
+}
+
+function addWatchlistEntry(wf, url){
+  const clean = (url || "").replace(/\r?\n/g," ").trim();
+  if (!clean) return;
+  const company = escCell(deriveCompanyName(clean));
+  const today = new Date().toISOString().slice(0,10);
+  const newLine = `| ${today} | ${company} | ${escCell(clean)} | |`;
+  const tables = parseTables(wf.lines);
+  if (tables.length){
+    const tbl = tables[0];
+    const insertIdx = tbl.rows.length ? tbl.rows[tbl.rows.length-1].lineIdx + 1 : tbl.headerIdx + 2;
+    wf.lines.splice(insertIdx, 0, newLine);
+  } else {
+    wf.lines.push(newLine);
+  }
+  wf.dirty = true; updateDirtyUI();
+  wf.tables = parseTables(wf.lines);
+}
+
+// Chip per watched company (click = open in split pane), a right-pinned "+" (grabs the
+// split-partner tab's URL, like manual.md's "Add split tab"), and scroll nubs that appear
+// only on overflow.
+function renderWatchlistStrip(){
+  const wf = files.get("watchlist.md");
+  if (!wf){
+    mainEl.appendChild(makeEmptyNote("watchlist.md is not open — open the job-search folder to use the company watchlist."));
+    return;
+  }
+  const entries = parseWatchlistEntries(wf.lines);
+
+  const wrap = document.createElement("div");
+  wrap.className = "watchwrap";
+
+  const row = document.createElement("div");
+  row.className = "chiprow";
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "chip-add";
+  addBtn.textContent = "+";
+  addBtn.title = "Add company from the split-pane tab";
+  addBtn.addEventListener("click", async () => {
+    await detectSplitPartner();
+    if (partnerTabId == null){
+      alert("No split pane detected. Split this tab first (right-click → Split tab), then retry.");
+      return;
+    }
+    try{
+      const r = await fetch(TAB_SHARE + "/tabs", { cache: "no-store" });
+      const data = await r.json();
+      const partner = (data.tabs || []).find(t => t.id === partnerTabId);
+      if (partner && partner.url){
+        addWatchlistEntry(wf, partner.url);
+        render();
+      } else {
+        alert("Could not read the split-partner tab URL.");
+      }
+    }catch(e){
+      alert("Tab Share error: " + e.message);
+    }
+  });
+
+  const leftNub = document.createElement("button");
+  leftNub.className = "chip-scroll"; leftNub.textContent = "‹"; leftNub.title = "Scroll left";
+  const rightNub = document.createElement("button");
+  rightNub.className = "chip-scroll"; rightNub.textContent = "›"; rightNub.title = "Scroll right";
+
+  const strip = document.createElement("div");
+  strip.className = "chipstrip";
+
+  if (!entries.length){
+    const empty = document.createElement("span");
+    empty.className = "chip-empty";
+    empty.textContent = "No companies yet — click + to add one from a split tab.";
+    strip.appendChild(empty);
+  }
+
+  entries.forEach(entry => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.title = entry.url;
+    const label = document.createElement("span");
+    label.textContent = entry.company || entry.url;
+    chip.appendChild(label);
+    chip.addEventListener("click", ev => {
+      if (isInteractiveClick(ev)) return;
+      if (entry.url) openInSplit(entry.url);
+    });
+    chip.appendChild(makeDeleteButton("Remove from watchlist", () => {
+      wf.lines.splice(entry.lineIdx, 1);
+      wf.dirty = true; updateDirtyUI();
+      wf.tables = parseTables(wf.lines);
+      render();
+    }, "chip-del"));
+    strip.appendChild(chip);
+  });
+
+  // Nubs only show on overflow, and disable at each scroll boundary.
+  const updateNubs = () => {
+    const overflowing = strip.scrollWidth > strip.clientWidth + 1;
+    leftNub.style.display = overflowing ? "flex" : "none";
+    rightNub.style.display = overflowing ? "flex" : "none";
+    if (!overflowing) return;
+    leftNub.disabled = strip.scrollLeft <= 0;
+    rightNub.disabled = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+    leftNub.style.opacity = leftNub.disabled ? .35 : 1;
+    rightNub.style.opacity = rightNub.disabled ? .35 : 1;
+  };
+  // Hover-to-scroll: hold the pointer over a nub to scroll continuously.
+  let scrollTimer = null;
+  const startScroll = dir => {
+    if (scrollTimer) return;
+    scrollTimer = setInterval(() => { strip.scrollLeft += dir * 8; updateNubs(); }, 16);
+  };
+  const stopScroll = () => { clearInterval(scrollTimer); scrollTimer = null; };
+  leftNub.addEventListener("mouseenter", () => startScroll(-1));
+  rightNub.addEventListener("mouseenter", () => startScroll(1));
+  leftNub.addEventListener("mouseleave", stopScroll);
+  rightNub.addEventListener("mouseleave", stopScroll);
+  leftNub.addEventListener("mouseup", stopScroll);
+  rightNub.addEventListener("mouseup", stopScroll);
+  strip.addEventListener("scroll", updateNubs);
+  window.addEventListener("resize", updateNubs);
+  requestAnimationFrame(updateNubs); // wait for layout so scrollWidth/clientWidth are accurate
+
+  row.appendChild(leftNub);
+  row.appendChild(strip);
+  row.appendChild(rightNub);
+  row.appendChild(addBtn);
+  wrap.appendChild(row);
+  mainEl.appendChild(wrap);
+}
 
 function renderManual(f){
   mainEl.innerHTML = "";
+
+  renderWatchlistStrip();
 
   mainEl.appendChild(makeSectionHeading("Manual URL additions"));
   mainEl.appendChild(makeHint("Add URLs here for roles you applied to or saved outside Simplify. On the next sync, Kiro will fetch the title, add them to <code>shortlist.md</code> or <code>applied.md</code>, and remove them from this list."));
@@ -1238,6 +1423,7 @@ async function reloadAll(){
 function buildTabs(){
   tabsEl.innerHTML="";
   for (const name of files.keys()){
+    if (name === "watchlist.md") continue; // shown as the chip strip above manual.md, not its own tab
     const b=document.createElement("button");
     b.textContent=name;
     if (name===activeName) b.classList.add("active");
@@ -1247,7 +1433,9 @@ function buildTabs(){
 }
 
 function afterLoad(){
-  if (!activeName && files.size) activeName=[...files.keys()][0];
+  if (!activeName && files.size){
+    activeName = [...files.keys()].find(n => n !== "watchlist.md") || [...files.keys()][0];
+  }
   $("#reload").disabled = files.size===0;
   $("#showRejWrap").style.display = files.size ? "" : "none";
   buildTabs(); render();
@@ -1259,31 +1447,16 @@ $("#openSimplify").addEventListener("click", ()=>openInSplit("https://simplify.j
 $("#openLinkedIn").addEventListener("click", ()=>openInSplit("https://www.linkedin.com/jobs/"));
 
 $("#openFolder").addEventListener("click", async ()=>{
-  if (!window.showDirectoryPicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave, or use “Open file(s)…”."); return; }
+  if (!window.showDirectoryPicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave."); return; }
   try{
     const dir = await window.showDirectoryPicker({ mode:"readwrite" });
     files.clear(); activeName=null;
     for await (const [n,h] of dir.entries()){
-      if (h.kind==="file" && /\.md$/i.test(n) && (n==="shortlist.md"||n==="applied.md"||n==="thoughts.md"||n==="manual.md")){
+      if (h.kind==="file" && /\.md$/i.test(n) && (n==="shortlist.md"||n==="applied.md"||n==="thoughts.md"||n==="manual.md"||n==="watchlist.md")){
         await loadHandle(h);
       }
     }
     if (!files.size){ setStatus("No shortlist.md / applied.md / thoughts.md found in that folder."); return; }
-    afterLoad();
-    await persistHandles();
-    $("#reconnect").style.display="none";
-  }catch(e){ if(e.name!=="AbortError") setStatus("Error: "+e.message); }
-});
-
-$("#openFiles").addEventListener("click", async ()=>{
-  if (!window.showOpenFilePicker){ alert("This browser lacks the File System Access API. Use Chrome/Edge/Brave."); return; }
-  try{
-    const handles = await window.showOpenFilePicker({
-      multiple:true,
-      types:[{description:"Markdown",accept:{"text/markdown":[".md"]}}]
-    });
-    files.clear(); activeName=null;
-    for (const h of handles) await loadHandle(h);
     afterLoad();
     await persistHandles();
     $("#reconnect").style.display="none";

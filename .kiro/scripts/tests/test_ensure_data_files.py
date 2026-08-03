@@ -78,6 +78,22 @@ class MissingSkeletonsTests(unittest.TestCase):
         text = E.APPLIED_SKELETON.format(date="2026-01-02")
         self.assertIn("**Last synced from Simplify:** 2026-01-02", text)
 
+    def test_watchlist_skeleton_has_companies_table(self):
+        self.assertIn("## Companies", E.WATCHLIST_SKELETON)
+        self.assertIn("| Added | Company | URL | CSS Selector |", E.WATCHLIST_SKELETON)
+        self.assertIn("|---|---|---|---|", E.WATCHLIST_SKELETON)
+
+    def test_watchlist_path_none_by_default_means_no_watchlist_in_the_plan(self):
+        missing = E.missing_skeletons(self.thoughts, self.manual, self.applied,
+                                      date="2026-07-31")
+        self.assertEqual(set(missing), {self.thoughts, self.manual, self.applied})
+
+    def test_watchlist_included_when_path_given(self):
+        watchlist = Path(self.tmp.name) / "watchlist.md"
+        missing = E.missing_skeletons(self.thoughts, self.manual, self.applied,
+                                      date="2026-07-31", watchlist_path=watchlist)
+        self.assertEqual(set(missing), {self.thoughts, self.manual, self.applied, watchlist})
+
     def test_shortlist_path_none_by_default_means_no_shortlist_in_the_plan(self):
         # the exact regression: a positional 4th arg silently becomes shortlist_path, not
         # date, and — since it's a truthy string, not None — gets included in the plan and
