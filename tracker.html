@@ -343,12 +343,6 @@ function render(){
 
   let lastSection = null;
   f.tables.forEach((tbl, ti) => {
-    if (tbl.sectionTitle && tbl.sectionTitle !== lastSection){
-      const h = document.createElement("div");
-      h.className="sec"; h.textContent = tbl.sectionTitle;
-      mainEl.appendChild(h);
-      lastSection = tbl.sectionTitle;
-    }
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
@@ -435,6 +429,13 @@ function render(){
       });
       tbody.appendChild(tr);
     });
+    if (shownCount === 0) return; // e.g. a tier with only rejected rows, hidden until "show rejected"
+    if (tbl.sectionTitle && tbl.sectionTitle !== lastSection){
+      const h = document.createElement("div");
+      h.className="sec"; h.textContent = tbl.sectionTitle;
+      mainEl.appendChild(h);
+      lastSection = tbl.sectionTitle;
+    }
     table.appendChild(tbody);
     mainEl.appendChild(table);
   });
@@ -1034,6 +1035,9 @@ function showSplitBanner(){
 }
 
 // ---------- Tab Share split detection ----------
+// The extension returns {error:"NO_SPLIT_TABS"} from /tabs when this tab has no split
+// partner, instead of the full open-tab list. Matched explicitly, not via empty-array
+// fallback, so a shape change fails loudly instead of silently reading as "no tabs".
 async function detectSplitPartner(){
   partnerTabId = null;
   try{
@@ -1041,6 +1045,9 @@ async function detectSplitPartner(){
     if (!r.ok) throw new Error("bad status");
     const data = await r.json();
     tsAvailable = true;
+    if (data.error === "NO_SPLIT_TABS"){
+      return null; // leave tsSupportsSplit as-is; this response has no tab data
+    }
     const tabs = data.tabs || [];
     tsSupportsSplit = tabs.some(t => typeof t.splitViewId !== "undefined" && t.splitViewId !== null);
     // find my own tab
