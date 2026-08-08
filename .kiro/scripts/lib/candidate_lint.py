@@ -25,7 +25,7 @@ WHAT IT DOES
 Checks that the caller RECORDED the judgment the playbook asks for, and does the two checks
 that are pure arithmetic or pure schema:
 
-  missing-evidence   Playbook §1f: "NEVER add a role to shortlist.md on title alone" — read
+  missing-evidence   Playbook §1g: "NEVER add a role to shortlist.md on title alone" — read
                      the responsibilities + requirements and capture the years-of-experience
                      bar. This asserts an `evidence` field exists and is substantive. It
                      CANNOT verify the read happened, only that a claim was recorded — but
@@ -91,7 +91,7 @@ def lint_candidate(cand, today=None, max_age_days=DEFAULT_MAX_AGE_DAYS, strict=T
         if not evidence:
             findings.append({
                 "code": "missing-evidence", "severity": "error",
-                "detail": "no `evidence` field. Playbook §1f: read the responsibilities and "
+                "detail": "no `evidence` field. Playbook §1g: read the responsibilities and "
                           "the requirements before adding a role, never the title alone — "
                           "then record what they said (especially the years-of-experience "
                           "bar) so the decision is reviewable"})

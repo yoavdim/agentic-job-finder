@@ -63,7 +63,7 @@ TODAY = "2026-07-29"
 
 def cand(**kw):
     # `evidence` and a Notes legend marker are what candidate_lint requires: the row has to
-    # record that the listing was actually read and classified (playbook §1f / §4).
+    # record that the listing was actually read and classified (playbook §1g / §4).
     base = {"company": "NewCo", "role": "Embedded Engineer", "location": "Toronto",
             "url": "https://new.test/job/1", "tier": 1, "notes": "✅ embedded",
             "evidence": "Responsibilities: C/C++ firmware. Requirements: 2-4 yrs, BSc."}

@@ -1,6 +1,8 @@
 # Run configuration
 
-Check the stages to run on the next pass.
+When running a search according to the playbook, run only the stages which are checked [X] in the following list:
+
+> **Pre-flight:** use check_browser_saved.py  to ensure no unsaved browser edits
 
 ## Stage 0 — Maintenance
 
@@ -15,11 +17,12 @@ Check the stages to run on the next pass.
 - [X] `1` [Search — sources](search-playbook.md#stage-1) (master)
   - [X] `1a` [Web search](search-playbook.md#stage-1a) — 🧠
   - [X] `1b` [Regional boards](search-playbook.md#stage-1b) — 🧠
-  - [X] `1c` [BuiltIn](search-playbook.md#stage-1c) — 🧠
-  - [X] `1d` [LinkedIn keyword searches](search-playbook.md#stage-1d) — 🔧
-  - [X] `1e` [LinkedIn recommended](search-playbook.md#stage-1e) — 🔧
-  - [X] `1f` [Triage + ATS verify](search-playbook.md#stage-1f) — 🧠
-  - [X] `1g` [Filter &amp; tier](search-playbook.md#stage-1g) — 🧠
+  - [X] `1c` [Company watchlist](search-playbook.md#stage-1c) — 🧠
+  - [X] `1d` [BuiltIn](search-playbook.md#stage-1d) — 🧠
+  - [X] `1e` [LinkedIn keyword searches](search-playbook.md#stage-1e) — 🔧
+  - [X] `1f` [LinkedIn recommended](search-playbook.md#stage-1f) — 🔧
+  - [X] `1g` [Triage + ATS verify](search-playbook.md#stage-1g) — 🧠
+  - [X] `1h` [Filter &amp; tier](search-playbook.md#stage-1h) — 🧠
 
 ## Stage 2 — Wrap-up
 
@@ -49,7 +52,8 @@ requires:
   1d: [1]
   1e: [1]
   1f: [1]
-  1g: [1f]
-  2a: [1g]
+  1g: [1]
+  1h: [1g]
+  2a: [1h]
   2b: [1, 0b]
 ```

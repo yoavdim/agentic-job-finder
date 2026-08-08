@@ -153,6 +153,31 @@
   </div>
 </div>
 
+<!-- Shared rendering templates: stamped by the renderers below instead of building the DOM
+     by hand. Only the genuinely repeated units live here — the table skeleton and the two
+     fixed widget cells (comment textarea, checkbox+reject). Rows are NOT templated: every
+     table uses one design, makeTable(headers, buildRows) + shared cell builders, and the
+     manual/Saved pages are just different combinations of those cells in sequence. -->
+<template id="tpl-table">
+  <table>
+    <thead><tr></tr></thead>
+    <tbody></tbody>
+  </table>
+</template>
+
+<template id="tpl-comment-cell">
+  <td class="comment">
+    <textarea class="cmt" rows="1" placeholder="add comment…"></textarea>
+  </td>
+</template>
+
+<template id="tpl-chk-cell">
+  <td class="chk">
+    <input type="checkbox" title="Mark applied">
+    <button class="rejbtn"></button>
+  </td>
+</template>
+
 <script>
 "use strict";
 
@@ -280,6 +305,87 @@ function makeRowClickable(tr, url){
   });
 }
 
+// Stamp one of the <template>s above into a fresh DocumentFragment. Cloning is the standard
+// replacement for per-call createElement/appendChild boilerplate in the renderers.
+function cloneTemplate(id){
+  return document.getElementById(id).content.cloneNode(true);
+}
+
+// A <table> with its thead filled from `headers` and rows built by `buildRows(tbody)`.
+// A header entry is a string, or {text,width} when it needs inline styling (the manual
+// page's empty delete-column header). Replaces the duplicated thead assembly that used to
+// live in all three table renderers. Returns the <table> — callers still append it (and any
+// section heading) to #main themselves.
+function makeTable(headers, buildRows){
+  const table = cloneTemplate("tpl-table").firstElementChild;
+  const htr = table.querySelector("thead tr");
+  headers.forEach(h => {
+    const th = document.createElement("th");
+    if (typeof h === "object"){ th.textContent = h.text; if (h.width) th.style.width = h.width; }
+    else th.textContent = h;
+    htr.appendChild(th);
+  });
+  const tbody = table.querySelector("tbody");
+  if (buildRows) buildRows(tbody);
+  return table;
+}
+
+// The editable Comment cell (textarea) shared by every generic-table renderer. `onInput`
+// receives the already-single-line, trimmed value after the "edited" marker is set; each
+// caller decides what to write from there.
+function makeCommentCell(value, onInput){
+  const td = cloneTemplate("tpl-comment-cell");
+  const ta = td.querySelector("textarea");
+  ta.value = value;
+  ta.addEventListener("input", () => {
+    ta.classList.add("edited");
+    onInput(ta.value.replace(/\r?\n/g," ").trim());
+  });
+  return td;
+}
+
+// The checkbox + reject-button status cell (shortlist/applied tables). The reject flow
+// itself (modal, [nope]/un-reject) stays local to render() in `onReject`; this helper only
+// owns the widget. `rejected` picks the ↩/✕ glyph, title, and checkbox lock-out.
+function makeChkCell({ checked, disabled, rejected, onToggle, onReject }){
+  const td = cloneTemplate("tpl-chk-cell");
+  const cb = td.querySelector("input");
+  const rej = td.querySelector("button");
+  cb.checked = checked;
+  cb.disabled = disabled;
+  rej.textContent = rejected ? "↩" : "✕";
+  rej.title = rejected ? "Un-reject (restore)" : "Reject (hide from list)";
+  cb.addEventListener("change", () => onToggle(cb.checked));
+  rej.addEventListener("click", e => { e.stopPropagation(); onReject(); });
+  return td;
+}
+
+// A plain text cell. Part of the small cell-builder vocabulary every table's row loop is
+// built from (with makeStatusCell/makeDeleteCell/makeCommentCell/makeChkCell/makeLinkCell),
+// so a row is just "append the cells for this table's columns, in order".
+function makeTextCell(text){
+  const td = document.createElement("td");
+  td.textContent = text;
+  return td;
+}
+
+// A cell wrapping a status <select> built by makeStatusSelect. Callers keep the select
+// reference to wire its change handler, then hand it over here.
+function makeStatusCell(sel){
+  const td = document.createElement("td");
+  td.appendChild(sel);
+  return td;
+}
+
+// A cell wrapping a delete ✕ button — the row-removing action (thoughts/manual), as
+// opposed to the shortlist's reject flow which keeps the row and marks it [nope].
+function makeDeleteCell(btn){
+  const td = document.createElement("td");
+  td.className = "chk";
+  td.appendChild(btn);
+  return td;
+}
+
 // ---------- markdown table parsing ----------
 const SEP_RE = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/;
 const isRow = l => { const s=l.trim(); return s.startsWith("|") && s.endsWith("|"); };
@@ -363,102 +469,84 @@ function render(){
   if (activeName === "manual.md"){ renderManual(f); return; }
   if (!f.tables.length){ mainEl.innerHTML = '<div class="empty">No tables found in this file.</div>'; return; }
 
+  const isShortlist = activeName === "shortlist.md";
   let lastSection = null;
   f.tables.forEach((tbl, ti) => {
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const htr = document.createElement("tr");
-    tbl.headers.forEach((h,ci)=>{
-      const th=document.createElement("th");
-      th.textContent = (ci===tbl.chkCol) ? "✓" : h;
-      htr.appendChild(th);
-    });
-    thead.appendChild(htr); table.appendChild(thead);
+    // On the shortlist, the role title IS the apply link (like manual.md), so the
+    // standalone "Apply link" column is redundant — hide it and link the title instead.
+    const roleCol = tbl.headers.findIndex(h => h.toLowerCase() === "role");
+    const applyCol = tbl.headers.findIndex(h => /apply/i.test(h));
+    const titleLink = isShortlist && applyCol >= 0;
+    const headers = tbl.headers.map((h, ci) => (titleLink && ci === applyCol) ? null
+      : (ci === tbl.chkCol ? "✓" : h)).filter(Boolean);
 
-    const tbody=document.createElement("tbody");
-    let shownCount = 0;
-    tbl.rows.forEach(row=>{
-      const rejected = tbl.chkCol!=null && isRejected(row.cells[tbl.chkCol]);
-      if (rejected && !showRejected) return; // hidden but stays in the file
-      shownCount++;
-      const tr=document.createElement("tr");
-      if (rejected) tr.classList.add("rejected");
-      const url = firstUrl(row.cells);
-      if (url){
-        tr.dataset.url = url;
-        tr.addEventListener("click", ev=>{
-          // don't hijack real clicks on links, checkboxes, buttons, or the comment box
-          if (isInteractiveClick(ev)) return;
-          selectRow(tr, url);
-        });
-      }
-      row.cells.forEach((cell,ci)=>{
-        const td=document.createElement("td");
-        if (ci===tbl.chkCol){
-          td.className="chk";
-          const cb=document.createElement("input");
-          cb.type="checkbox";
-          cb.checked = /\[x\]/i.test(cell);
-          cb.disabled = rejected; // can't be "applied" while rejected
-          cb.title = "Mark applied";
-          cb.addEventListener("change",()=>{
-            row.cells[ci] = cb.checked ? "[x]" : "[ ]";
-            commitRow(f,row,tbl);
+    const table = makeTable(headers, tbody => {
+      tbl.rows.forEach(row => {
+        const rejected = tbl.chkCol != null && isRejected(row.cells[tbl.chkCol]);
+        if (rejected && !showRejected) return; // hidden but stays in the file
+        const tr = document.createElement("tr");
+        if (rejected) tr.classList.add("rejected");
+        const url = firstUrl(row.cells);
+        if (url){
+          tr.dataset.url = url;
+          tr.addEventListener("click", ev => {
+            // don't hijack real clicks on links, checkboxes, buttons, or the comment box
+            if (isInteractiveClick(ev)) return;
+            selectRow(tr, url);
           });
-          td.appendChild(cb);
-          const rej=document.createElement("button");
-          rej.className="rejbtn";
-          rej.textContent = rejected ? "↩" : "✕";
-          rej.title = rejected ? "Un-reject (restore)" : "Reject (hide from list)";
-          rej.addEventListener("click",(e)=>{
-            e.stopPropagation();
-            if (rejected){
-              // un-reject: restore to open, leave comment as-is
-              row.cells[ci] = "[ ]";
-              commitRow(f,row,tbl);
-              render();
-            } else {
-              const roleCol = tbl.headers.findIndex(h=>h.toLowerCase()==="role");
-              openRejectModal({
-                title: "Reject: " + (roleCol>=0 ? row.cells[roleCol] : "role"),
-                initialComment: tbl.commentCol!=null ? (row.cells[tbl.commentCol]||"") : "",
-                onConfirm: (_code, merged) => {
-                  row.cells[ci] = "[nope]";
-                  if (tbl.commentCol!=null) row.cells[tbl.commentCol] = merged;
+        }
+        row.cells.forEach((cell, ci) => {
+          if (titleLink && ci === applyCol) return;
+          if (ci === tbl.chkCol){
+            tr.appendChild(makeChkCell({
+              checked: /\[x\]/i.test(cell),
+              disabled: rejected, // can't be "applied" while rejected
+              rejected,
+              onToggle: checked => { row.cells[ci] = checked ? "[x]" : "[ ]"; commitRow(f,row,tbl); },
+              onReject: () => {
+                if (rejected){
+                  // un-reject: restore to open, leave comment as-is
+                  row.cells[ci] = "[ ]";
                   commitRow(f,row,tbl);
                   render();
-                },
-              });
-            }
-          });
-          td.appendChild(rej);
-        } else if (ci===tbl.commentCol){
-          td.className="comment";
-          const ta=document.createElement("textarea");
-          ta.className="cmt"; ta.rows=1; ta.value=cell;
-          ta.placeholder="add comment…";
-          ta.addEventListener("input",()=>{
-            const v = ta.value.replace(/\r?\n/g," ").trim(); // markdown cells are single-line
-            row.cells[ci]=v;
-            ta.classList.add("edited");
-            commitRow(f,row,tbl);
-          });
-          td.appendChild(ta);
-        } else {
-          td.innerHTML = renderCell(cell);
-        }
-        tr.appendChild(td);
+                } else {
+                  const roleCol = tbl.headers.findIndex(h=>h.toLowerCase()==="role");
+                  openRejectModal({
+                    title: "Reject: " + (roleCol>=0 ? row.cells[roleCol] : "role"),
+                    initialComment: tbl.commentCol!=null ? (row.cells[tbl.commentCol]||"") : "",
+                    onConfirm: (_code, merged) => {
+                      row.cells[ci] = "[nope]";
+                      if (tbl.commentCol!=null) row.cells[tbl.commentCol] = merged;
+                      commitRow(f,row,tbl);
+                      render();
+                    },
+                  });
+                }
+              },
+            }));
+          } else if (ci === tbl.commentCol){
+            tr.appendChild(makeCommentCell(cell, v => { row.cells[ci] = v; commitRow(f,row,tbl); }));
+          } else if (titleLink && ci === roleCol && url){
+            const td = document.createElement("td");
+            td.appendChild(makeLinkCell(url, cell));
+            tr.appendChild(td);
+          } else {
+            const td = document.createElement("td");
+            td.innerHTML = renderCell(cell);
+            tr.appendChild(td);
+          }
+        });
+        tbody.appendChild(tr);
       });
-      tbody.appendChild(tr);
     });
-    if (shownCount === 0) return; // e.g. a tier with only rejected rows, hidden until "show rejected"
+
+    if (!table.tBodies[0].children.length) return; // e.g. a tier with only rejected rows, hidden until "show rejected"
     if (tbl.sectionTitle && tbl.sectionTitle !== lastSection){
       const h = document.createElement("div");
       h.className="sec"; h.textContent = tbl.sectionTitle;
       mainEl.appendChild(h);
       lastSection = tbl.sectionTitle;
     }
-    table.appendChild(tbody);
     mainEl.appendChild(table);
   });
 }
@@ -588,13 +676,49 @@ function parseManualEntries(lines){
   });
 }
 
+// Workday job-detail URLs carry the real title in the last path segment as
+// "<Title>_<RequisitionID>" (e.g. .../details/Senior-Software-Developer--PreCon_26WD98043-1),
+// while the page's own <title> is a generic "Search for Jobs". Strip the trailing
+// "<RequID>" token (letters/digits, contains a digit) and decode the dashes.
+function workdayTitleFromUrl(url){
+  let path;
+  try{ path = new URL(url).pathname; }catch{ return null; }
+  if (!/\/details\//i.test(path)) return null;
+  const seg = (path.split("/").filter(Boolean).pop() || "");
+  if (!seg) return null;
+  const parts = seg.split("_");
+  if (parts.length > 1){
+    const last = parts[parts.length-1];
+    if (/^[\w-]+$/.test(last) && /[a-z]/i.test(last) && /\d/.test(last)) parts.pop();
+  }
+  const title = parts.join("_").replace(/--/g, "\u0000").replace(/-/g, " ").replace(/\u0000/g, " - ").trim();
+  return title || null;
+}
+
+// <title> values that carry no job info (Workday's default, generic careers pages).
+// Matches bare "Search for Jobs"/"Careers" and those followed by a separator
+// ("Search for Jobs | Autodesk", "Careers - Acme", …).
+const GENERIC_TITLES = /^(search for jobs|jobs|careers|job search|find jobs|apply now|.*careers.*)$|^(search for jobs|careers|job search|find jobs|apply now)[\s|:–—-].*$/i;
+
+// Apply the fallback: given an (optional) page title, return a meaningful one — the
+// URL-embedded Workday title when the page's is generic/missing.
+function resolveTitle(url, title){
+  if (!title || GENERIC_TITLES.test(title)){
+    const fromUrl = workdayTitleFromUrl(url);
+    if (fromUrl) return fromUrl;
+  }
+  return title;
+}
+
 async function fetchPageTitle(url){
+  let title = null;
   try{
     const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
     const html = await r.text();
     const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    return m ? m[1].trim() : null;
-  }catch{ return null; }
+    title = m ? m[1].trim() : null;
+  }catch{}
+  return resolveTitle(url, title);
 }
 
 function addManualEntry(f, url, status, title){
@@ -623,20 +747,114 @@ function addManualEntry(f, url, status, title){
   render();
 }
 // ---------- company watchlist (watchlist.md) — chip strip shown above manual.md ----------
-// Schema: | Added | Company | URL | CSS Selector |. Selector column is unused for now.
+// Schema: | Added | Company | URL | CSS Selector | Referee |. Selector column is unused
+// for now; Referee is `yes`/`no` (default `no` when added via the tracker).
 
 // Hostname labels to drop when deriving a display name (job boards, ATS subdomains) and
 // trailing TLD-like labels (e.g. "acme.com" -> ["acme"]).
 const WATCHLIST_STRIP_LABELS = new Set(["www","jobs","job","career","careers","glassdoor","myworkdayjobs"]);
 const WATCHLIST_TLD_RE = /^(com|org|net|io|co|ca|us|uk|dev|app|jobs|careers|company|inc)$/i;
 
+// ATS provider domains whose hostname is shared by every tenant (Lever, Greenhouse, Ashby,
+// SmartRecruiters, …) — there the employer is the FIRST PATH segment (jobs.lever.co/<co>,
+// boards.greenhouse.io/<co>), not the hostname, and exact hostname compare would break.
+// Data only, no per-ATS code: add a provider here and both the company name and the
+// watchlist matching pick it up. Everything else is hostname-based (workday: <co>.wd1.…).
+const ATS_PATH_DOMAINS = new Set([
+  "lever.co", "greenhouse.io", "ashbyhq.com", "smartrecruiters.com",
+  "jazz.co", "workable.com", "recruitee.com", "jobvite.com",
+]);
+
+// Normalized identity of the employer within its careers site. Used for both the display
+// name and to match manual entries against watchlist companies.
+function companyKey(url){
+  let u;
+  try{ u = new URL(url); }catch{ return null; }
+  const labels = u.hostname.split(".").filter(Boolean);
+  const rd = labels.slice(-2).join(".").toLowerCase();
+  if (ATS_PATH_DOMAINS.has(rd)){
+    const seg = u.pathname.split("/").filter(Boolean)[0];
+    return seg ? rd + "/" + decodeURIComponent(seg).toLowerCase() : rd;
+  }
+  const kept = labels.filter(l => {
+    const low = l.toLowerCase();
+    return low !== "www" && low !== "jobs" && low !== "job" && low !== "career" && low !== "careers" && !/^wd\d+$/.test(low);
+  });
+  return kept.join(".").toLowerCase();
+}
+
 function deriveCompanyName(url){
-  let host;
-  try{ host = new URL(url).hostname; }catch{ return url; }
-  let labels = host.split(".").filter(Boolean);
-  while (labels.length > 1 && WATCHLIST_TLD_RE.test(labels[labels.length-1])) labels.pop();
-  const kept = labels.filter(l => !WATCHLIST_STRIP_LABELS.has(l.toLowerCase()));
-  return (kept.length ? kept : labels).map(l => l[0].toUpperCase() + l.slice(1)).join(" ");
+  const key = companyKey(url);
+  if (!key) return url;
+  const words = key.split("/").pop().split(/[.\-]+/).filter(Boolean);
+  const kept = words.filter(w => {
+    const low = w.toLowerCase();
+    return !WATCHLIST_STRIP_LABELS.has(low) && !WATCHLIST_TLD_RE.test(low) && !/^wd\d+$/.test(low);
+  });
+  return (kept.length ? kept : words).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Company colorcoding (watchlist chips + manual "Added" dates). A curated palette, assigned
+// by order of appearance — watchlist.md entries first (in file order), then any other
+// companies seen in manual.md. So colors are stable while the list stays put; they only
+// reshuffle when a listing is deleted. More companies than palette entries wrap around.
+const COMPANY_PALETTE = [
+  "#e0585a", // red
+  "#e8913a", // orange
+  "#d4c132", // yellow
+  "#3ecf8e", // green
+  "#2fb6b6", // teal
+  "#4f9ff5", // blue
+  "#8a63d2", // purple
+  "#c44db0", // magenta
+  "#e07fb2", // pink
+  "#b8843a", // brown
+  "#7cc95e", // lime
+  "#5b9dff", // light blue
+];
+
+// company display name -> palette color, rebuilt per render.
+function buildCompanyColorMap(manualLines, hostmap){
+  const map = new Map();
+  let i = 0;
+  const next = name => {
+    if (!name || map.has(name)) return;
+    map.set(name, COMPANY_PALETTE[i % COMPANY_PALETTE.length]);
+    i++;
+  };
+  const wf = files.get("watchlist.md");
+  if (wf) for (const e of parseWatchlistEntries(wf.lines)) next(e.company || deriveCompanyName(e.url));
+  if (manualLines) for (const e of parseManualEntries(manualLines)) next(companyNameForUrl(e.url, hostmap));
+  return map;
+}
+
+function companyColor(name, colorMap){
+  return colorMap && colorMap.has(name) ? colorMap.get(name) : "#2a2f3a";
+}
+
+// company key -> company display name, built once from watchlist.md. First match wins.
+function watchlistHostmap(){
+  const map = new Map();
+  const wf = files.get("watchlist.md");
+  if (!wf) return map;
+  for (const e of parseWatchlistEntries(wf.lines)){
+    if (!e.company) continue;
+    const key = companyKey(e.url);
+    if (key && !map.has(key)) map.set(key, e.company);
+  }
+  return map;
+}
+
+// Company name for an arbitrary URL: watchlist match by company key first (works for
+// path-based ATS too, where hostnames are shared), else the same generic parser the
+// watchlist uses. Computed on load only — never written to manual.md.
+function companyNameForUrl(url, hostmap){
+  if (hostmap && hostmap.size){
+    const key = companyKey(url);
+    const hit = key ? hostmap.get(key) : null;
+    if (hit) return hit;
+  }
+  return deriveCompanyName(url);
 }
 
 function parseWatchlistEntries(lines){
@@ -650,6 +868,7 @@ function parseWatchlistEntries(lines){
     company: r.cells[1] || "",
     url: r.cells[2] || "",
     selector: r.cells[3] || "",
+    referee: r.cells[4] || "",
   }));
 }
 
@@ -658,7 +877,7 @@ function addWatchlistEntry(wf, url){
   if (!clean) return;
   const company = escCell(deriveCompanyName(clean));
   const today = new Date().toISOString().slice(0,10);
-  const newLine = `| ${today} | ${company} | ${escCell(clean)} | |`;
+  const newLine = `| ${today} | ${company} | ${escCell(clean)} | | no |`;
   const tables = parseTables(wf.lines);
   if (tables.length){
     const tbl = tables[0];
@@ -674,7 +893,7 @@ function addWatchlistEntry(wf, url){
 // Chip per watched company (click = open in split pane), a right-pinned "+" (grabs the
 // split-partner tab's URL, like manual.md's "Add split tab"), and scroll nubs that appear
 // only on overflow.
-function renderWatchlistStrip(){
+function renderWatchlistStrip(colorMap){
   const wf = files.get("watchlist.md");
   if (!wf){
     mainEl.appendChild(makeEmptyNote("watchlist.md is not open — open the job-search folder to use the company watchlist."));
@@ -732,6 +951,8 @@ function renderWatchlistStrip(){
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.title = entry.url;
+    const name = entry.company || deriveCompanyName(entry.url);
+    chip.style.borderColor = companyColor(name, colorMap);
     const label = document.createElement("span");
     label.textContent = entry.company || entry.url;
     chip.appendChild(label);
@@ -740,6 +961,8 @@ function renderWatchlistStrip(){
       if (entry.url) openInSplit(entry.url);
     });
     chip.appendChild(makeDeleteButton("Remove from watchlist", () => {
+      const name = entry.company || deriveCompanyName(entry.url);
+      if (!confirm(`Remove ${name} from the watchlist?`)) return;
       wf.lines.splice(entry.lineIdx, 1);
       wf.dirty = true; updateDirtyUI();
       wf.tables = parseTables(wf.lines);
@@ -787,7 +1010,9 @@ function renderWatchlistStrip(){
 function renderManual(f){
   mainEl.innerHTML = "";
 
-  renderWatchlistStrip();
+  const hostmap = watchlistHostmap();
+  const colorMap = buildCompanyColorMap(f.lines, hostmap);
+  renderWatchlistStrip(colorMap);
 
   mainEl.appendChild(makeSectionHeading("Manual URL additions"));
   mainEl.appendChild(makeHint("Add URLs here for roles you applied to or saved outside Simplify. On the next sync, Kiro will fetch the title, add them to <code>shortlist.md</code> or <code>applied.md</code>, and remove them from this list."));
@@ -823,6 +1048,12 @@ function renderManual(f){
   optSaved.value = "saved"; optSaved.textContent = "Saved";
   statusSel.appendChild(optApplied);
   statusSel.appendChild(optSaved);
+  // Remember the chosen status across refreshes for this tab session only (sessionStorage
+  // is dropped when the tab closes, so it never leaks into later sessions).
+  try{ const prev = sessionStorage.getItem("manualStatusDraft"); if (prev) statusSel.value = prev; }catch(e){}
+  statusSel.addEventListener("change", () => {
+    try{ sessionStorage.setItem("manualStatusDraft", statusSel.value); }catch(e){}
+  });
   statusWrap.appendChild(statusLabel);
   statusWrap.appendChild(statusSel);
 
@@ -855,7 +1086,7 @@ function renderManual(f){
       const data = await r.json();
       const partner = (data.tabs || []).find(t => t.id === partnerTabId);
       if (partner && partner.url){
-        addManualEntry(f, partner.url, statusSel.value, partner.title || null);
+        addManualEntry(f, partner.url, statusSel.value, resolveTitle(partner.url, partner.title || null));
         urlInput.value = ""; urlInput.focus();
       } else {
         alert("Could not read the split-partner tab URL.");
@@ -879,67 +1110,52 @@ function renderManual(f){
     return;
   }
 
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const htr = document.createElement("tr");
-  ["Added","URL","Status"].forEach(h => {
-    const th = document.createElement("th");
-    th.textContent = h;
-    htr.appendChild(th);
-  });
-  const thDel = document.createElement("th"); thDel.textContent = ""; thDel.style.width = "40px";
-  htr.appendChild(thDel);
-  thead.appendChild(htr); table.appendChild(thead);
+  const table = makeTable(
+    [{text:"Added"},{text:"URL"},{text:"Status"},{text:"",width:"40px"}],
+    tbody => {
+      entries.forEach(entry => {
+        const tr = document.createElement("tr");
+        makeRowClickable(tr, entry.url);
+        tr.appendChild(makeTextCell(entry.added));
 
-  const tbody = document.createElement("tbody");
-  entries.forEach(entry => {
-    const tr = document.createElement("tr");
-    tr.style.cursor = "pointer";
-    makeRowClickable(tr, entry.url);
+        // URL (clickable) — the title label is tinted with the entry's company color,
+        // matched against the watchlist chip.
+        const urlCell = document.createElement("td");
+        const company = companyNameForUrl(entry.url, hostmap);
+        if (entry.url){
+          const link = makeLinkCell(entry.url, entry.title);
+          link.style.color = companyColor(company, colorMap);
+          link.title = company + " — " + entry.url;
+          urlCell.appendChild(link);
+        }
+        tr.appendChild(urlCell);
 
-    // Added
-    const tdDate = document.createElement("td");
-    tdDate.textContent = entry.added;
-    tr.appendChild(tdDate);
+        // Status (editable — toggle between saved/applied)
+        const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok" : ""); };
+        const sel = makeStatusSelect(
+          [["saved", "saved"], ["applied", "applied"]], entry.status, paint);
+        sel.addEventListener("change", ev => {
+          ev.stopPropagation();
+          paint(sel);
+          const newCells = [...entry.cells];
+          newCells[2] = sel.value;
+          f.lines[entry.lineIdx] = rebuildLine(newCells);
+          f.dirty = true;
+          updateDirtyUI();
+        });
+        tr.appendChild(makeStatusCell(sel));
 
-    // URL (clickable)
-    const tdUrl = document.createElement("td");
-    if (entry.url){
-      tdUrl.appendChild(makeLinkCell(entry.url, entry.title));
-    }
-    tr.appendChild(tdUrl);
+        // Delete button
+        tr.appendChild(makeDeleteCell(makeDeleteButton("Remove entry", () => {
+          f.lines.splice(entry.lineIdx, 1);
+          f.dirty = true; updateDirtyUI();
+          f.tables = parseTables(f.lines);
+          render();
+        })));
 
-    // Status (editable — toggle between saved/applied)
-    const tdStatus = document.createElement("td");
-    const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok" : ""); };
-    const sel = makeStatusSelect(
-      [["saved", "saved"], ["applied", "applied"]], entry.status, paint);
-    sel.addEventListener("change", ev => {
-      ev.stopPropagation();
-      paint(sel);
-      const newCells = [...entry.cells];
-      newCells[2] = sel.value;
-      f.lines[entry.lineIdx] = rebuildLine(newCells);
-      f.dirty = true;
-      updateDirtyUI();
+        tbody.appendChild(tr);
+      });
     });
-    tdStatus.appendChild(sel);
-    tr.appendChild(tdStatus);
-
-    // Delete button
-    const tdDel = document.createElement("td");
-    tdDel.className = "chk";
-    tdDel.appendChild(makeDeleteButton("Remove entry", () => {
-      f.lines.splice(entry.lineIdx, 1);
-      f.dirty = true; updateDirtyUI();
-      f.tables = parseTables(f.lines);
-      render();
-    }));
-    tr.appendChild(tdDel);
-
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
   mainEl.appendChild(table);
 
   renderSavedMirror();
@@ -989,103 +1205,88 @@ function renderSavedMirror(){
   const headers = ["Saved","Role","Status"];
   if (showRejected) headers.push("Comment");
 
-  const table = document.createElement("table");
-  const thead = document.createElement("thead");
-  const htr = document.createElement("tr");
-  headers.forEach(h => {
-    const th = document.createElement("th");
-    th.textContent = h;
-    htr.appendChild(th);
-  });
-  thead.appendChild(htr); table.appendChild(thead);
+  const table = makeTable(headers, tbody => {
+    tbl.rows.forEach(row => {
+      const tr = document.createElement("tr");
+      const { url } = parseUrlCell(ciApply >= 0 ? (row.cells[ciApply] || "") : "");
+      makeRowClickable(tr, url);
+      tr.appendChild(makeTextCell(row.cells[0] || ""));
 
-  const tbody = document.createElement("tbody");
-  tbl.rows.forEach(row => {
-    const tr = document.createElement("tr");
-    const { url } = parseUrlCell(ciApply >= 0 ? (row.cells[ciApply] || "") : "");
-    makeRowClickable(tr, url);
-
-    const tdDate = document.createElement("td");
-    tdDate.textContent = row.cells[0] || "";
-    tr.appendChild(tdDate);
-
-    const tdRole = document.createElement("td");
-    const roleText = (ciRole >= 0 ? (row.cells[ciRole] || "") : "").trim();
-    if (url){
-      tdRole.appendChild(makeLinkCell(url, roleText));
-    } else {
-      tdRole.textContent = roleText;
-    }
-    // A row with no Simplify id can't be pushed; say so where the user is deciding.
-    const hasId = ciSimplify >= 0 && /tracker\?id=/.test(row.cells[ciSimplify] || "");
-    if (!hasId){
-      const note = document.createElement("span");
-      note.className = "badge";
-      note.style.cssText = "margin-left:6px;font-size:10px";
-      note.textContent = "no id";
-      note.title = "No Simplify tracker id captured for this row, so a status change can't be pushed. The next sync captures it.";
-      tdRole.appendChild(note);
-    }
-    tr.appendChild(tdRole);
-
-    // Status — the editable intent cell
-    const tdStatus = document.createElement("td");
-    const cur = (ciStatus >= 0 ? (row.cells[ciStatus] || "") : "").trim().toLowerCase();
-    const initial = (cur === "applied" || cur === "rejected") ? cur : "";
-    const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok"
-                                                  : s.value === "rejected" ? " bad" : ""); };
-    const sel = makeStatusSelect(
-      [["", "saved"], ["applied", "applied"], ["rejected", "rejected"]], initial, paint);
-    let lastCommitted = sel.value; // tracks the last value actually written, for cancel-revert
-    if (ciStatus < 0) sel.disabled = true;
-
-    const writeCell = (idx, value) => {
-      if (idx < 0) return;
-      const cells = [...row.cells];
-      while (cells.length <= idx) cells.push("");
-      cells[idx] = value;
-      row.cells = cells;
-      applied.lines[row.lineIdx] = rebuildLine(cells);
-      applied.dirty = true;
-      updateDirtyUI();
-    };
-
-    sel.addEventListener("change", ev => {
-      ev.stopPropagation();
-      if (sel.value === "rejected"){
-        // A rejection needs a reason chip, same requirement and same modal as the
-        // shortlist flow — see openRejectModal's comment for why it's mandatory.
-        openRejectModal({
-          title: "Reject: " + roleText,
-          initialComment: ciComment >= 0 ? (row.cells[ciComment] || "") : "",
-          onConfirm: (_code, merged) => {
-            writeCell(ciStatus, "rejected");
-            if (ciComment >= 0) writeCell(ciComment, merged);
-            sel.value = "rejected"; lastCommitted = "rejected"; paint(sel);
-          },
-          onCancel: () => { sel.value = lastCommitted; paint(sel); },
-        });
+      // Role — linked when an apply URL exists, with a "no id" note when Simplify didn't
+      // capture a tracker id (a status change can't be pushed until the next sync).
+      const roleCell = document.createElement("td");
+      const roleText = (ciRole >= 0 ? (row.cells[ciRole] || "") : "").trim();
+      if (url){
+        roleCell.appendChild(makeLinkCell(url, roleText));
       } else {
-        paint(sel);
-        writeCell(ciStatus, sel.value);
-        lastCommitted = sel.value;
+        roleCell.textContent = roleText;
       }
+      const hasId = ciSimplify >= 0 && /tracker\?id=/.test(row.cells[ciSimplify] || "");
+      if (!hasId){
+        const note = document.createElement("span");
+        note.className = "badge";
+        note.style.cssText = "margin-left:6px;font-size:10px";
+        note.textContent = "no id";
+        note.title = "No Simplify tracker id captured for this row, so a status change can't be pushed. The next sync captures it.";
+        roleCell.appendChild(note);
+      }
+      tr.appendChild(roleCell);
+
+      // Status — the editable intent cell
+      const cur = (ciStatus >= 0 ? (row.cells[ciStatus] || "") : "").trim().toLowerCase();
+      const initial = (cur === "applied" || cur === "rejected") ? cur : "";
+      const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok"
+                                                    : s.value === "rejected" ? " bad" : ""); };
+      const sel = makeStatusSelect(
+        [["", "saved"], ["applied", "applied"], ["rejected", "rejected"]], initial, paint);
+      let lastCommitted = sel.value; // tracks the last value actually written, for cancel-revert
+      if (ciStatus < 0) sel.disabled = true;
+
+      const writeCell = (idx, value) => {
+        if (idx < 0) return;
+        const cells = [...row.cells];
+        while (cells.length <= idx) cells.push("");
+        cells[idx] = value;
+        row.cells = cells;
+        applied.lines[row.lineIdx] = rebuildLine(cells);
+        applied.dirty = true;
+        updateDirtyUI();
+      };
+
+      sel.addEventListener("change", ev => {
+        ev.stopPropagation();
+        if (sel.value === "rejected"){
+          // A rejection needs a reason chip, same requirement and same modal as the
+          // shortlist flow — see openRejectModal's comment for why it's mandatory.
+          openRejectModal({
+            title: "Reject: " + roleText,
+            initialComment: ciComment >= 0 ? (row.cells[ciComment] || "") : "",
+            onConfirm: (_code, merged) => {
+              writeCell(ciStatus, "rejected");
+              if (ciComment >= 0) writeCell(ciComment, merged);
+              sel.value = "rejected"; lastCommitted = "rejected"; paint(sel);
+            },
+            onCancel: () => { sel.value = lastCommitted; paint(sel); },
+          });
+        } else {
+          paint(sel);
+          writeCell(ciStatus, sel.value);
+          lastCommitted = sel.value;
+        }
+      });
+      tr.appendChild(makeStatusCell(sel));
+
+      // The Comment column (the rejection reason) is read-only here: it's set through the
+      // reject dialog, which enforces picking a chip, not free-typed — this just reviews
+      // what got recorded. Hidden unless "show rejected" is on, matching how rejected rows
+      // everywhere are kept-but-hidden; omitting the cell drops the column entirely.
+      if (showRejected){
+        tr.appendChild(makeTextCell(ciComment >= 0 ? (row.cells[ciComment] || "") : ""));
+      }
+
+      tbody.appendChild(tr);
     });
-    tdStatus.appendChild(sel);
-    tr.appendChild(tdStatus);
-
-    if (showRejected){
-      // Read-only here on purpose: the reason is set through the reject dialog (which
-      // enforces picking a chip), not free-typed in the table — this is just a way to
-      // review what got recorded.
-      const tdCmt = document.createElement("td");
-      tdCmt.textContent = ciComment >= 0 ? (row.cells[ciComment] || "") : "";
-      tr.appendChild(tdCmt);
-    }
-
-    tbody.appendChild(tr);
   });
-  table.appendChild(tbody);
   mainEl.appendChild(table);
 }
 
@@ -1390,20 +1591,50 @@ async function loadHandle(handle){
   const file = await handle.getFile();
   const raw = await file.text();
   const lines = raw.split("\n");
-  const rec = { handle, raw, lines, tables: parseTables(lines), dirty:false };
+  // loadedAt = the disk mtime when this session read the file; saveAll compares against it
+  // to detect edits made locally (in another editor) since this session started.
+  const rec = { handle, raw, lines, tables: parseTables(lines), dirty:false, loadedAt: file.lastModified };
   files.set(handle.name, rec);
   return rec;
 }
 
 async function saveAll(){
-  for (const [name,f] of files){
-    if (!f.dirty) continue;
+  const dirtyFiles = [...files.values()].filter(f => f.dirty);
+  if (!dirtyFiles.length){ setStatus("Nothing to save"); return; }
+
+  // Snapshot each dirty file's disk mtime in parallel. If ANY was edited on disk since
+  // this session loaded it, saving would clobber those local edits — ask once, all-or-nothing.
+  const snapshots = await Promise.all(dirtyFiles.map(async f => {
+    try{
+      const file = await f.handle.getFile();
+      return { f, touched: file.lastModified > f.loadedAt };
+    }catch(e){
+      return { f, touched: true }; // unreadable metadata — treat as externally touched
+    }
+  }));
+  const touched = snapshots.filter(s => s.touched).map(s => s.f);
+  if (touched.length){
+    const names = touched.map(f => f.handle.name).join(", ");
+    const ok = confirm(
+      "These file(s) were changed on disk since this session loaded them — saving now " +
+      "would overwrite those local edits:\n\n" + names + "\n\nSave anyway?"
+    );
+    if (!ok){
+      setStatus("Save cancelled — files changed on disk.");
+      return; // nothing written
+    }
+  }
+
+  // Writes stay sequential per file — createWritable() can't be open twice on the same
+  // handle, and awaiting each write keeps the save button state honest.
+  for (const f of dirtyFiles){
     const text = f.lines.join("\n");
     const w = await f.handle.createWritable();
     await w.write(text);
     await w.close();
     f.raw = text;
     f.dirty = false;
+    f.loadedAt = (await f.handle.getFile()).lastModified; // baseline = version we just wrote
   }
   document.querySelectorAll(".cmt.edited").forEach(e=>e.classList.remove("edited"));
   setStatus("Saved ✓","saved");
@@ -1415,10 +1646,18 @@ async function reloadAll(){
     const file = await f.handle.getFile();
     const raw = await file.text();
     f.raw=raw; f.lines=raw.split("\n"); f.tables=parseTables(f.lines); f.dirty=false;
+    f.loadedAt = file.lastModified; // baseline now matches what we just read
   }
   render(); setStatus("Reloaded from disk");
   $("#save").disabled = true;
 }
+
+// Remember which file tab is open across refreshes, for this tab session only
+// (sessionStorage is dropped when the tab closes). Saved on tab click, restored on load
+// only if that file is actually among the opened ones.
+const ACTIVE_FILE_KEY = "activeFile";
+function saveActiveName(){ try{ sessionStorage.setItem(ACTIVE_FILE_KEY, activeName || ""); }catch(e){} }
+function readSavedActiveName(){ try{ return sessionStorage.getItem(ACTIVE_FILE_KEY) || ""; }catch(e){ return ""; } }
 
 function buildTabs(){
   tabsEl.innerHTML="";
@@ -1427,15 +1666,18 @@ function buildTabs(){
     const b=document.createElement("button");
     b.textContent=name;
     if (name===activeName) b.classList.add("active");
-    b.addEventListener("click",()=>{ activeName=name; buildTabs(); render(); });
+    b.addEventListener("click",()=>{ activeName=name; saveActiveName(); buildTabs(); render(); });
     tabsEl.appendChild(b);
   }
 }
 
 function afterLoad(){
-  if (!activeName && files.size){
+  const saved = readSavedActiveName();
+  if (saved && files.has(saved)) activeName = saved;
+  else if (!activeName && files.size){
     activeName = [...files.keys()].find(n => n !== "watchlist.md") || [...files.keys()][0];
   }
+  saveActiveName();
   $("#reload").disabled = files.size===0;
   $("#showRejWrap").style.display = files.size ? "" : "none";
   buildTabs(); render();

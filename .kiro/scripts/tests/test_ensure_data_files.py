@@ -80,8 +80,8 @@ class MissingSkeletonsTests(unittest.TestCase):
 
     def test_watchlist_skeleton_has_companies_table(self):
         self.assertIn("## Companies", E.WATCHLIST_SKELETON)
-        self.assertIn("| Added | Company | URL | CSS Selector |", E.WATCHLIST_SKELETON)
-        self.assertIn("|---|---|---|---|", E.WATCHLIST_SKELETON)
+        self.assertIn("| Added | Company | URL | CSS Selector | Referee |", E.WATCHLIST_SKELETON)
+        self.assertIn("|---|---|---|---|---|", E.WATCHLIST_SKELETON)
 
     def test_watchlist_path_none_by_default_means_no_watchlist_in_the_plan(self):
         missing = E.missing_skeletons(self.thoughts, self.manual, self.applied,

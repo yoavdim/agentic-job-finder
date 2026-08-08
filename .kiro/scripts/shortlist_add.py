@@ -183,7 +183,7 @@ def main():
                     help=f"recency cutoff for the stale-posting check "
                          f"(default {CL.DEFAULT_MAX_AGE_DAYS})")
     ap.add_argument("--no-strict", action="store_true",
-                    help="drop the `evidence` requirement (playbook §1f asks for the "
+                    help="drop the `evidence` requirement (playbook §1g asks for the "
                          "responsibilities + requirements to be read and recorded before a "
                          "role is added; use this only for pre-reviewed bulk imports)")
     ap.add_argument("--apply", action="store_true", help="write the file (default: dry run)")

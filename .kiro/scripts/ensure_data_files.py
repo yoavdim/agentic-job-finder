@@ -37,16 +37,18 @@ Roles found and applied/saved outside Simplify, captured via `tracker.html` as a
 
 # Companies to periodically check for new openings, added via tracker.html's chip strip
 # (shown above manual.md, never its own tab). CSS Selector is reserved for future scraping
-# and unused for now — kept in the schema so no migration is needed when that lands.
+# and unused for now — kept in the schema so no migration is needed when that lands. Referee
+# is `yes`/`no` (whether you have a referral); the tracker defaults new rows to `no`.
 WATCHLIST_SKELETON = """# Company Watchlist
 
 Companies to periodically check for new openings — added via `tracker.html`. CSS
-selector is reserved for future scraping; unused for now.
+selector is reserved for future scraping; unused for now. Referee is `yes`/`no` —
+whether you have a referral at the company (defaults to `no` when added via the tracker).
 
 ## Companies
 
-| Added | Company | URL | CSS Selector |
-|---|---|---|---|
+| Added | Company | URL | CSS Selector | Referee |
+|---|---|---|---|---|
 """
 
 APPLIED_SKELETON = """# Applied / In-Motion Tracker — Yoav Dim

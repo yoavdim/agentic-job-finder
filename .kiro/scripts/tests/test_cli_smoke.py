@@ -137,6 +137,7 @@ ALL_SCRIPTS = [
     SCRIPTS / "housekeeping.py",
     SCRIPTS / "ensure_data_files.py",
     SCRIPTS / "run_config_check.py",
+    SCRIPTS / "check_browser_saved.py",
     SKILL_SCRIPTS / "parse_tracker.py",
     SKILL_SCRIPTS / "simplify_actions.py",
 ]
@@ -356,7 +357,7 @@ class FullPassTests(WorkspaceCase):
         run([SCRIPTS / "liveness_sweep.py", *common, "--today", TODAY, "--age-only",
              "--apply"], cwd=self.ws, expect_rc=0)
 
-        # 1g: add a new find
+        # 1h: add a new find
         (self.ws / "c.json").write_text(json.dumps([{
             "company": "Fresh Co", "role": "Embedded Engineer", "location": "Toronto",
             "url": "https://job-boards.greenhouse.io/fresh/jobs/1", "tier": 1,

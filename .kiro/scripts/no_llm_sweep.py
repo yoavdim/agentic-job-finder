@@ -19,8 +19,14 @@ and writing applied.md/shortlist.md locally. So on Simplify's side, dry-run mean
 mutation, but yes I did just read your tracker list" — not "nothing happened."
 
 Usage:
-    no_llm_sweep.py             # applies for real
-    no_llm_sweep.py --dry-run   # preview only
+    no_llm_sweep.py             # applies for real (checks browser edits saved first)
+    no_llm_sweep.py --dry-run   # preview only (still checks)
+    no_llm_sweep.py --yes       # acknowledge edits are saved; skip the check (scripted runs)
+
+Pre-flight: reads the .md files from disk, but tracker.html edits only reach disk when the
+user clicks Save changes in the browser. check_browser_saved.py asks every open
+tracker.html tab (via the Tab Share extension) whether its Save button is enabled, and if
+any tab has unsaved edits it waits for the user to save them before the sweep runs.
 """
 import subprocess
 import sys
@@ -41,10 +47,20 @@ STAGE_SCRIPTS = {
 
 sys.path.insert(0, str(HERE))
 import run_config_check as RCC
+import check_browser_saved
 
 
 def main(argv=None):
     args = argv if argv is not None else sys.argv[1:]
+    # Pre-flight: the sweep reads the .md files from disk, but tracker.html edits only reach
+    # disk when the user clicks Save changes in the browser — anything still browser-only is
+    # invisible to this run and its writes can clobber those edits. check_browser_saved
+    # finds every open tracker.html tab via Tab Share and asks whether its Save button is
+    # enabled; if any tab is dirty it waits for the user to save in the browser.
+    if not check_browser_saved.confirm_browser_saved(args):
+        print("Aborted: save tracker.html edits in the browser before running the sweep.",
+              file=sys.stderr)
+        return 2
     apply_ = "--dry-run" not in args  # default ON; each stage's own guards still apply
     cfg = (WORKSPACE / ".kiro" / "steering" / "run-config.md").read_text(encoding="utf-8")
     members = RCC.parse_deps(cfg).get("profiles", {}).get("no-llm-sweep", [])
