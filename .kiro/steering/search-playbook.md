@@ -35,12 +35,17 @@ python3 .kiro/skills/simplify-tracker-sync/scripts/saved_sync_cli.py --apply
 Calls Simplify's list API, merges into `applied.md`, pushes local statuses back.
 
 ### 0c — Process manual.md URLs <a id="stage-0c"></a>
-`manual.md` rows have status `applied` or `saved` (no `rejected`). Only `applied` rows
-auto-transfer, and only when the URL structure alone yields both company and role
-(`migrate_resolved.py --manual`): they move to `## Applied` in `applied.md`, then the row
-is cleared. `saved` rows are **left in place by default** — promoting one to a shortlist
+`manual.md` rows have status `saved`, `applied`, or `rejected` — a rejection carries its
+reason in the row's Comment column (set via the reason picker in `tracker.html`). Rows
+transfer automatically when the URL structure alone yields both company and role
+(`migrate_resolved.py --manual`): `applied` rows move to `## Applied`, `rejected` rows move
+to `## Rejected` (reason classified from the Comment, dated with the drain day), then the
+row is cleared. `saved` rows are **left in place by default** — promoting one to a shortlist
 candidate needs a tier + Notes classification, which is judgment, not something to do
-silently. Resolve a `saved` row into `shortlist.md` only on explicit request.
+silently. Resolve a `saved` row into `shortlist.md` only on explicit request. Rows whose
+URL doesn't encode both fields are left in place for this stage's LLM pass (it can read the
+page); rejected rows still sitting in the inbox stay indexed by `dedup_index`, so the role
+is never re-suggested.
 
 ### 0d — Migrate resolved shortlist rows <a id="stage-0d"></a>
 ```bash
@@ -79,14 +84,26 @@ BuiltIn, university boards, aggregators. Client-side rendered → use browser `/
 ### 1c — Company watchlist <a id="stage-1c"></a>
 Read `watchlist.md` — companies tracked via `tracker.html`, each with a careers URL. Always
 the browser, never a raw webfetch: the boards are JS-rendered (Workday, Lever, Applytojob,
-SPA career sites). **Open every URL first, then extract** — two phases so all tabs load in
-parallel instead of serially:
+SPA career sites).
+
+**Selector-bearing companies are scripted.** For every `## Companies` row with a CSS
+selector filled in, `watchlist_scrape.py` opens the careers URL and extracts the job cards
+by that selector — read-only, nothing is written:
+```bash
+python3 .kiro/scripts/watchlist_scrape.py --json -   # new postings as JSON on stdout
+```
+It prints every new posting (`company`, `title`, `url`) not already tracked and leaves
+`watchlist.md` alone — nothing lands in `## Scraped (watchlist)`. "Already tracked" covers
+scraped, flushed and rejected rows, so nothing previously seen is re-surfaced. Review the
+listings it prints and file keepers straight into the triage path. (The
+`## Scraped (watchlist)` inbox and its flush belong to the separate scrape routine, not
+this search.)
+
+**Manual open-then-extract** (companies without a selector, or to double-check a board) —
+**open every URL first, then extract**, two phases so all tabs load in parallel instead of
+serially:
 1. Loop over the watchlist URLs, `open_tab` each into "Scratch", collect the `tabId`s
 2. Extract each tab by its `tabId` (`extract(tab_id=…)` — see §1d) and read the postings
-
-These are already vetted targets, so go deeper than generic web search: scan for in-scope
-roles from `job-search-prefs.md` (embedded / kernel / systems / DSP / junior-level, Toronto
-area) and feed keepers into the same triage + ATS-verify path as the other search stages (§1g).
 ```python
 import sys; sys.path.insert(0, '.kiro/scripts/lib')
 import time, tab_share as TS
@@ -96,6 +113,11 @@ time.sleep(3)
 for tid in tabs:                                                 # phase 2: extract each
     print(TS.extract(tab_id=tid)['text'])
 ```
+
+These are already vetted targets, so go deeper than generic web search: scan for in-scope
+roles from `job-search-prefs.md` (embedded / kernel / systems / DSP / junior-level, Toronto
+area) and feed keepers — scripted or manual — into the same triage + ATS-verify path as the
+other search stages (§1g).
 
 ### 1d — BuiltIn <a id="stage-1d"></a>
 ```bash
@@ -142,6 +164,21 @@ Update "Last searched" / "Last synced" dates.
 ---
 
 ## Quick reference
+
+**Routine launcher** (PyQt5 picker → emits the prompt for the agent to run; reads
+run-config.md, never writes it; search shows a validated stage-plan):
+```bash
+python3 routine_launcher.py
+```
+
+**Reject all open shortlist rows** (asks for a reason + comment; marks every `[ ]` row
+`[nope]` — `[x]`/`[nope]` rows are left alone. Then `migrate_resolved.py --apply` moves
+them to `## Rejected`; the same action exists as the **Reject all open** button on
+tracker.html's shortlist page):
+```bash
+python3 .kiro/scripts/reject_shortlist.py          # interactive
+python3 .kiro/scripts/reject_shortlist.py --reason not-interested --comment "flush" --yes
+```
 
 **Add to shortlist** (`--candidates` takes a JSON FILE PATH, not inline JSON — write to a
 temp file first):

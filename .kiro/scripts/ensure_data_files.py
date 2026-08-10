@@ -27,12 +27,12 @@ bullet. Before the next search pass, Kiro folds these into
 
 MANUAL_SKELETON = """# Manual URL additions
 
-Roles found and applied/saved outside Simplify, captured via `tracker.html` as a URL + status. Each row is resolved into `applied.md`/`shortlist.md` at stage 0 and then deleted.
+Roles found and applied/saved outside Simplify, captured via `tracker.html` as a URL + status. Each row is resolved into `applied.md`/`shortlist.md` at stage 0 and then deleted. Status is `saved`, `applied`, or `rejected`; the Comment column holds the rejection reason.
 
 ## Entries
 
-| Added | URL | Status |
-|---|---|---|
+| Added | URL | Status | Comment |
+|---|---|---|---|
 """
 
 # Companies to periodically check for new openings, added via tracker.html's chip strip
@@ -49,6 +49,13 @@ whether you have a referral at the company (defaults to `no` when added via the 
 
 | Added | Company | URL | CSS Selector | Referee |
 |---|---|---|---|---|
+
+## Scraped (watchlist)
+
+**Last flush:** never
+
+| Added | URL | Status |
+|---|---|---|
 """
 
 APPLIED_SKELETON = """# Applied / In-Motion Tracker — Yoav Dim
@@ -80,6 +87,13 @@ Reason codes: `link-broken` (crawl/link failed) · `listing-removed` (role close
 
 | Rejected | Company | Role | Raw | Location | Apply | Reason | Comment |
 |---|---|---|---|---|---|---|---|
+
+## Scraped-flushed (watchlist)
+
+Watchlist inbox rows the flush sweep aged out (auto-rejected `too-old`). The permanent dedup record for `watchlist_scrape.py` — created on the first flush if this template predates it.
+
+| Rejected | Company | Role | URL | Reason | Comment |
+|---|---|---|---|---|---|
 """
 
 
