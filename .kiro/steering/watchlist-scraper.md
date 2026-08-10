@@ -57,6 +57,12 @@ append every entry not already tracked anywhere as `| Added | [Title](<url>) | S
 and manual.md — so applied / saved / rejected / flushed roles are never re-surfaced, and a
 row already in the inbox isn't duplicated. Dedup key is the ATS code of the resolved URL.
 
+**"Listing removed" auto-flush:** During the scrape, if a scraped row's listing is no longer
+present on the live company careers page (and the row is still unmarked, and its company's
+scrape succeeded), it is immediately removed from the inbox and flushed to
+`## Scraped-flushed (watchlist)` with reason `listing-removed` rather than waiting for
+the `too-old` manual flush.
+
 Dry run by default; `--apply` writes. `--json FILE` dumps the per-company plan.
 
 ## Flush the inbox (scripted, no LLM)

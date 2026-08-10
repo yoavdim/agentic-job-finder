@@ -34,32 +34,35 @@ python3 .kiro/skills/simplify-tracker-sync/scripts/saved_sync_cli.py --apply
 ```
 Calls Simplify's list API, merges into `applied.md`, pushes local statuses back.
 
-### 0c — Process manual.md URLs <a id="stage-0c"></a>
+### 0c — File manual applied/rejected URLs <a id="stage-0c"></a>
 `manual.md` rows have status `saved`, `applied`, or `rejected` — a rejection carries its
 reason in the row's Comment column (set via the reason picker in `tracker.html`). Rows
 transfer automatically when the URL structure alone yields both company and role
 (`migrate_resolved.py --manual`): `applied` rows move to `## Applied`, `rejected` rows move
 to `## Rejected` (reason classified from the Comment, dated with the drain day), then the
-row is cleared. `saved` rows are **left in place by default** — promoting one to a shortlist
-candidate needs a tier + Notes classification, which is judgment, not something to do
-silently. Resolve a `saved` row into `shortlist.md` only on explicit request. Rows whose
-URL doesn't encode both fields are left in place for this stage's LLM pass (it can read the
-page); rejected rows still sitting in the inbox stay indexed by `dedup_index`, so the role
-is never re-suggested.
+row is cleared. Rows whose URL doesn't encode both fields are left in place for this stage's 
+LLM pass (it can read the page); rejected rows still sitting in the inbox stay indexed by 
+`dedup_index`, so the role is never re-suggested.
 
-### 0d — Migrate resolved shortlist rows <a id="stage-0d"></a>
+### 0d — Promote manual saved URLs <a id="stage-0d"></a>
+`saved` rows in `manual.md` are left in place by default — promoting one to a shortlist
+candidate needs a tier + Notes classification, which is judgment, not something to do
+silently. Resolve a `saved` row into `shortlist.md` only on explicit request by reading
+the job description.
+
+### 0e — Migrate resolved shortlist rows <a id="stage-0e"></a>
 ```bash
 python3 .kiro/scripts/migrate_resolved.py --apply
 ```
 Moves `[x]` rows to `## Applied`, `[nope]` rows to `## Rejected`.
 
-### 0e — Liveness sweep <a id="stage-0e"></a>
+### 0f — Liveness sweep <a id="stage-0f"></a>
 ```bash
 python3 .kiro/scripts/liveness_sweep.py --apply
 ```
 Removes dead links and stale postings from shortlist.
 
-**0b + 0d + 0e in one call** (the `no-llm-sweep` profile in `run-config.md`, no LLM judgment
+**0b + 0e + 0f in one call** (the `no-llm-sweep` profile in `run-config.md`, no LLM judgment
 needed for any of it):
 ```bash
 python3 .kiro/scripts/no_llm_sweep.py             # applies for real (default)
@@ -68,7 +71,7 @@ python3 .kiro/scripts/no_llm_sweep.py --dry-run   # preview: writes/pushes skipp
 **Applies by default** — deliberately the one script that inverts the workspace's usual
 dry-run-first convention, so this maintenance sweep can't drift from being run. Reads the
 stage list from `run-config.md`'s `no-llm-sweep` profile itself (not a hardcoded copy) and
-runs them in the order that matters: 0b before 0d so 0d's dedup sees what 0b just did; 0e
+runs them in the order that matters: 0b before 0e so 0e's dedup sees what 0b just did; 0f
 last since it deletes shortlist rows. `--dry-run` still skips writes and Simplify pushes,
 but 0b's read of the live tracker list happens either way — it always talks to
 `api.simplify.jobs` to build the plan, dry run or not.

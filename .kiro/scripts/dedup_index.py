@@ -174,7 +174,7 @@ class DedupIndex:
         A row sitting in the inbox is a role you have ALREADY applied to or saved — the
         only thing missing is the bookkeeping. Leaving this file out of the index (as it was
         until now) meant a later search could re-suggest a role you had already applied to,
-        and you could apply twice. That hole widened once stage 0d began deliberately
+        and you could apply twice. That hole widened once stage 0e began deliberately
         leaving rows it couldn't resolve from the URL alone.
 
         Only the URL is dependable here: the row has no company/role columns. A recognised

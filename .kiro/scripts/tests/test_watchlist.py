@@ -287,6 +287,81 @@ class LastFlushStampTests(unittest.TestCase):
         self.assertEqual(len(t.rows), 1)
         self.assertEqual(t.rows[0].get("apply"), "[x](<https://x.test/job/1>)")
 
+# Watchlist with scraped rows for removal tests.
+# Autodesk has a selector (was scraped); Kepler has no selector (not scraped).
+REMOVAL_WATCHLIST = """# Watchlist
+
+## Companies
+
+| Added | Company | URL | CSS Selector | Referee |
+|---|---|---|---|---|
+| 2026-08-03 | Autodesk | https://job-boards.greenhouse.io/autodesk | a.job-title | yes |
+| 2026-08-04 | Kepler | https://jobs.lever.co/kepler?location=Toronto |  | no |
+
+## Scraped (watchlist)
+
+| Added | URL | Status |
+|---|---|---|
+| 2026-08-06 | [Still There](<https://job-boards.greenhouse.io/autodesk/jobs/10>) |  |
+| 2026-08-06 | [Gone Role](<https://job-boards.greenhouse.io/autodesk/jobs/20>) |  |
+| 2026-08-06 | [Marked Applied](<https://job-boards.greenhouse.io/autodesk/jobs/30>) | applied |
+| 2026-08-06 | [Kepler Role](<https://jobs.lever.co/kepler/abc123>) |  |
+"""
+
+
+class FindRemovedTests(unittest.TestCase):
+    def _autodesk_result(self, live_job_ids):
+        """Fake scrape result for Autodesk with the given job ids on the live page."""
+        live_keys = set()
+        for jid in live_job_ids:
+            live_keys.add(M.ats_code(
+                f"https://job-boards.greenhouse.io/autodesk/jobs/{jid}"))
+        return {"company": "Autodesk", "error": None, "new": [],
+                "seen": len(live_job_ids), "live_keys": live_keys}
+
+    def test_removed_listing_is_flushed(self):
+        # job=10 is still live, job=20 is gone
+        results = [self._autodesk_result([10])]
+        removed, to_delete = WS.find_removed(
+            REMOVAL_WATCHLIST.splitlines(), results, set())
+        self.assertEqual(len(removed), 1)
+        self.assertEqual(removed[0]["role"], "Gone Role")
+        self.assertEqual(removed[0]["reason"], "listing-removed")
+        self.assertEqual(removed[0]["company"], "Autodesk")
+        self.assertIn("listing removed (auto)", removed[0]["comment"])
+        self.assertEqual(len(to_delete), 1)
+
+    def test_errored_company_rows_are_left_alone(self):
+        results = [{"company": "Autodesk", "error": "timeout",
+                     "new": [], "seen": 0}]
+        removed, to_delete = WS.find_removed(
+            REMOVAL_WATCHLIST.splitlines(), results, set())
+        self.assertEqual(removed, [])
+        self.assertEqual(to_delete, [])
+
+    def test_marked_rows_are_left_alone(self):
+        # job=30 is gone from live but has Status "applied" → should not be removed
+        results = [self._autodesk_result([10])]
+        removed, _ = WS.find_removed(
+            REMOVAL_WATCHLIST.splitlines(), results, set())
+        roles = [r["role"] for r in removed]
+        self.assertNotIn("Marked Applied", roles)
+
+    def test_unscraped_company_rows_left_alone(self):
+        # Kepler has no selector, so no result for it → its rows are untouched
+        results = [self._autodesk_result([10])]
+        removed, _ = WS.find_removed(
+            REMOVAL_WATCHLIST.splitlines(), results, set())
+        roles = [r["role"] for r in removed]
+        self.assertNotIn("Kepler Role", roles)
+
+    def test_all_live_means_nothing_removed(self):
+        results = [self._autodesk_result([10, 20, 30])]
+        removed, to_delete = WS.find_removed(
+            REMOVAL_WATCHLIST.splitlines(), results, set())
+        self.assertEqual(removed, [])
+        self.assertEqual(to_delete, [])
+
 
 if __name__ == "__main__":
     unittest.main()

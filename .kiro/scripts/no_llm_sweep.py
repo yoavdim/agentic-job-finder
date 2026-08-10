@@ -37,12 +37,12 @@ WORKSPACE = HERE.parent.parent
 SKILL = WORKSPACE / ".kiro" / "skills" / "simplify-tracker-sync" / "scripts"
 RC = HERE / "run_config_check.py"
 
-# stage id -> (script, args). Run order = this dict's order (0b before 0d: 0d's dedup
-# should see what 0b just did; 0e last since it deletes shortlist rows).
+# stage id -> (script, args). Run order = this dict's order (0b before 0e: 0e's dedup
+# should see what 0b just did; 0f last since it deletes shortlist rows).
 STAGE_SCRIPTS = {
     "0b": (SKILL / "saved_sync_cli.py", ["--applied", "applied.md"]),
-    "0d": (HERE / "migrate_resolved.py", ["--shortlist", "shortlist.md", "--applied", "applied.md"]),
-    "0e": (HERE / "liveness_sweep.py", ["--shortlist", "shortlist.md", "--applied", "applied.md"]),
+    "0e": (HERE / "migrate_resolved.py", ["--shortlist", "shortlist.md", "--applied", "applied.md"]),
+    "0f": (HERE / "liveness_sweep.py", ["--shortlist", "shortlist.md", "--applied", "applied.md"]),
 }
 
 sys.path.insert(0, str(HERE))

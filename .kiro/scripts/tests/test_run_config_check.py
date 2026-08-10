@@ -15,11 +15,11 @@ VALID_CONFIG = """# Run configuration
 ## Stage 0
 - [x] `0a` [Fold](search-playbook.md#stage-0a) — 🧠
 - [x] `0b` [Sync](search-playbook.md#stage-0b) — 🔧
-- [x] `0e` [Sweep](search-playbook.md#stage-0e) — 🔧
+- [x] `0f` [Sweep](search-playbook.md#stage-0f) — 🔧
 
 ```yaml
 profiles:
-  no-llm-sweep: ["0b", "0e"]
+  no-llm-sweep: ["0b", "0f"]
 ```
 """
 
@@ -29,12 +29,12 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(RC.validate(VALID_CONFIG), [])
 
     def test_llm_stage_in_a_no_llm_profile_is_rejected(self):
-        cfg = VALID_CONFIG.replace('no-llm-sweep: ["0b", "0e"]', 'no-llm-sweep: ["0a", "0b"]')
+        cfg = VALID_CONFIG.replace('no-llm-sweep: ["0b", "0f"]', 'no-llm-sweep: ["0a", "0b"]')
         issues = RC.validate(cfg)
         self.assertTrue(any("`0a`" in i and "not 🔧" in i for i in issues), issues)
 
     def test_unknown_stage_in_a_profile_is_rejected(self):
-        cfg = VALID_CONFIG.replace('no-llm-sweep: ["0b", "0e"]', 'no-llm-sweep: ["0b", "9z"]')
+        cfg = VALID_CONFIG.replace('no-llm-sweep: ["0b", "0f"]', 'no-llm-sweep: ["0b", "9z"]')
         issues = RC.validate(cfg)
         self.assertTrue(any("unknown stage" in i and "9z" in i for i in issues), issues)
 
@@ -46,7 +46,7 @@ class ProfileTests(unittest.TestCase):
 class ParseDepsTests(unittest.TestCase):
     def test_parses_profiles(self):
         deps = RC.parse_deps(VALID_CONFIG)
-        self.assertEqual(deps["profiles"]["no-llm-sweep"], ["0b", "0e"])
+        self.assertEqual(deps["profiles"]["no-llm-sweep"], ["0b", "0f"])
 
     def test_parses_column0_requires_block(self):
         cfg = VALID_CONFIG + """
@@ -55,13 +55,13 @@ class ParseDepsTests(unittest.TestCase):
 ```yaml
 requires:
   0b: [0a]
-  0e: [0a]
+  0f: [0a]
   2b: [1, 0b]
 ```
 """
         deps = RC.parse_deps(cfg)
         self.assertEqual(deps["requires"]["0b"], ["0a"])
-        self.assertEqual(deps["requires"]["0e"], ["0a"])
+        self.assertEqual(deps["requires"]["0f"], ["0a"])
         self.assertEqual(deps["requires"]["2b"], ["1", "0b"])
 
     def test_real_config_has_requires(self):

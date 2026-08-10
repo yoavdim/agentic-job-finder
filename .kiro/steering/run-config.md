@@ -8,9 +8,10 @@ When running a search according to the playbook, run only the stages which are c
 
 - [X] `0a` [Fold thoughts.md into prefs](search-playbook.md#stage-0a) — 🧠
 - [X] `0b` [Sync Simplify tracker](search-playbook.md#stage-0b) — 🔧
-- [X] `0c` [Process manual.md URLs](search-playbook.md#stage-0c) — 🧠
-- [X] `0d` [Migrate resolved shortlist rows](search-playbook.md#stage-0d) — 🔧
-- [X] `0e` [Liveness sweep](search-playbook.md#stage-0e) — 🔧
+- [X] `0c` [File manual applied/rejected URLs](search-playbook.md#stage-0c) — 🧠
+- [ ] `0d` [Promote manual saved URLs](search-playbook.md#stage-0d) — 🧠
+- [X] `0e` [Migrate resolved shortlist rows](search-playbook.md#stage-0e) — 🔧
+- [X] `0f` [Liveness sweep](search-playbook.md#stage-0f) — 🔧
 
 ## Stage 1 — Searches
 
@@ -33,7 +34,7 @@ When running a search according to the playbook, run only the stages which are c
 
 ```yaml
 profiles:
-  no-llm-sweep: ["0b", "0d", "0e"]
+  no-llm-sweep: ["0b", "0e", "0f"]
 ```
 
 ## Dependencies
@@ -45,6 +46,7 @@ requires:
   0c: [0a]
   0d: [0a]
   0e: [0a]
+  0f: [0a]
   1: []
   1a: [1]
   1b: [1]

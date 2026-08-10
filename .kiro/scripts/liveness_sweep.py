@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 0c — liveness & staleness sweep over open shortlist rows (search-playbook §8).
+"""Stage 0f — liveness & staleness sweep over open shortlist rows (search-playbook §8).
 
 Order matters: **age is checked first**. A row that fails the recency cutoff is removed as
 `too-old` without spending a network probe on it.

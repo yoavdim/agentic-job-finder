@@ -9,7 +9,7 @@ at all. Each open row is marked `[nope]` and its Comment is written as
 verbatim (the same shape the reject dialog in tracker.html writes).
 
 It stops after marking: the actual move into `## Rejected` in applied.md is
-`migrate_resolved.py --apply` (stage 0d / the no-llm-sweep), which is a separate,
+`migrate_resolved.py --apply` (stage 0e / the no-llm-sweep), which is a separate,
 already-tested step.
 
 Reasons are the shared taxonomy from `reasons.py`, identical to the launcher's

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for liveness_sweep.py — stage 0c sweep (playbook §8). No network: probes mocked."""
+"""Tests for liveness_sweep.py — stage 0f sweep (playbook §8). No network: probes mocked."""
 import sys
 import unittest
 from unittest.mock import patch

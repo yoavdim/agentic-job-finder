@@ -10,8 +10,8 @@ Routines:
   search            — full pass; shows run-config.md's stage checkboxes, validated against
                       the `requires` graph, and emits the selected run plan as the prompt
   scrape            — watchlist scrape (`watchlist_scrape.py --apply`)
-  no-llm sweep      — `no_llm_sweep.py` (0b + 0d + 0e, applies by default)
-  stage 0 only      — full stage-0 maintenance (0a–0e, including the LLM-judgment parts)
+  no-llm sweep      — `no_llm_sweep.py` (0b + 0e + 0f, applies by default)
+  stage 0 only      — full stage-0 maintenance (0a–0f, including the LLM-judgment parts)
   reject shortlist  — the shortlist's "flush" (no script exists): mark every open `[ ]`
                       row `[nope]` + a reason, then migrate via `migrate_resolved.py`
   view in chrome    — no prompt; the card's button opens tracker.html in Chromium and
@@ -34,9 +34,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / ".kiro" / "scripts"))
 sys.path.insert(0, str(HERE / ".kiro" / "scripts" / "lib"))
-import run_config_check as RCC
-import tab_share as TS
-from reasons import REASON_CODES
+import run_config_check as RCC  # type: ignore
+import tab_share as TS  # type: ignore
+from reasons import REASON_CODES  # type: ignore
 
 DEFAULT_CONFIG = HERE / ".kiro" / "steering" / "run-config.md"
 
@@ -96,12 +96,12 @@ ROUTINES = [
      "Fill the empty CSS Selector cells in watchlist.md's `## Companies` via the selector "
      "pass. LLM-dependent: probe candidate selectors live, iterate, then commit each "
      "winner with `watchlist_selectors.py write --apply`."),
-    ("no-llm-sweep", "No-LLM sweep", "#3ecf8e", "0b + 0d + 0e — fully scripted",
+    ("no-llm-sweep", "No-LLM sweep", "#3ecf8e", "0b + 0e + 0f — fully scripted",
      "`no_llm_sweep.py` — the fully-scripted maintenance stages (Simplify sync, resolved "
      "migration, liveness sweep). Applies by default; it pre-flights `check_browser_saved`."),
-    ("stage0", "Stage 0 only", "#f0a850", "Maintenance 0a–0e",
-     "The whole stage-0 maintenance pass (0a–0e), including the LLM-judgment parts "
-     "(fold thoughts, process manual URLs). 0b/0d/0e can be run together via `no_llm_sweep.py`."),
+    ("stage0", "Stage 0 only", "#f0a850", "Maintenance 0a–0f",
+     "The whole stage-0 maintenance pass (0a–0f), including the LLM-judgment parts "
+     "(fold thoughts, process manual URLs). 0b/0e/0f can be run together via `no_llm_sweep.py`."),
     ("reject-shortlist", "Reject / flush all", "#ef5350", "The shortlist's 'flush'",
      ""),
     ("view-in-chrome", "View tracker in Chrome", "#4fc1f0", "opens tracker.html",
@@ -174,7 +174,7 @@ def scrape_prompt():
 
 
 def no_llm_sweep_prompt():
-    return "Run the no-LLM sweep script (applies 0b + 0d + 0e)."
+    return "Run the no-LLM sweep script (applies 0b + 0e + 0f)."
 
 
 def stage0_prompt():

@@ -259,7 +259,7 @@ def plan_manual(manual_lines, applied_lines, actions=None, today=None):
             continue
         if status not in ("applied", "rejected"):
             leave(f"status is {status or 'saved'!r}: placing it needs a tier + Notes "
-                  f"classification, which is judgment (stage 0c)")
+                  f"classification, which is judgment (stage 0d)")
             continue
 
         ident = UI.identify(url, raw_title=link_text)
@@ -377,7 +377,7 @@ def summarize(actions):
     if actions.get("manual_new"):
         parts.append(f"{len(actions['manual_new'])} manual.md row(s) -> ## Applied")
     if actions.get("manual_left"):
-        parts.append(f"{len(actions['manual_left'])} manual.md row(s) left for stage 0c")
+        parts.append(f"{len(actions['manual_left'])} manual.md row(s) left for stage 0c/0d")
     parts += [
         f"{len(actions['applied_comment'])} comment(s) folded onto existing Applied rows",
         f"{len(actions['rejected_new'])} -> ## Rejected",
@@ -399,7 +399,7 @@ def main():
     ap.add_argument("--manual", default=None,
                     help="also drain manual.md rows whose company AND role are encoded in "
                          "the URL structure (no LLM). Rows needing the page read are left "
-                         "in place for stage 0c.")
+                         "in place for stage 0c/0d.")
     ap.add_argument("--today", default=datetime.now().strftime("%Y-%m-%d"))
     ap.add_argument("--apply", action="store_true", help="write the files (default: dry run)")
     ap.add_argument("--json", help="write the plan as JSON here ('-' = stdout)")

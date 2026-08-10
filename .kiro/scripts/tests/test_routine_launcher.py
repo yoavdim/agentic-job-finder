@@ -17,7 +17,10 @@ import routine_launcher as RL
 REQUIRES = {
     "0a": [],
     "0b": ["0a"],
+    "0c": ["0a"],
     "0d": ["0a"],
+    "0e": ["0a"],
+    "0f": ["0a"],
     "1": [],
     "1a": ["1"],
     "1b": ["1"],

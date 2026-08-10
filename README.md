@@ -132,6 +132,8 @@ static HTML file:
   clicking a row swaps the preview without any iframe. Its CORS policy is what makes this
   safe: the local `file://` page is allowed only the low-risk `/tabs` and `/navigate`
   endpoints, and arbitrary websites are blocked outright.
+- **Agentic GUI** — when the agent opens the launcher UI, it catches the stdout for the
+  prompt and directly executes the routine the user intended.
 
 ## What's in here
 

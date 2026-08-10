@@ -354,11 +354,11 @@ class FullPassTests(WorkspaceCase):
         run([SCRIPTS / "run_config_check.py", "--playbook",
              SCRIPTS.parent / "steering" / "search-playbook.md"], cwd=self.ws, expect_rc=0)
 
-        # 0b: cross-reference, then 0d: migrate resolved rows
+        # 0b: cross-reference, then 0e: migrate resolved rows
         run([SCRIPTS / "crossref.py", *common, "--apply"], cwd=self.ws, expect_rc=0)
         run([SCRIPTS / "migrate_resolved.py", *common, "--today", TODAY, "--apply"], cwd=self.ws, expect_rc=0)
 
-        # 0e: liveness sweep
+        # 0f: liveness sweep
         run([SCRIPTS / "liveness_sweep.py", *common, "--today", TODAY, "--age-only",
              "--apply"], cwd=self.ws, expect_rc=0)
 

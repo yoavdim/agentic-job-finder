@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 0f — push local `## Saved` statuses back to Simplify, then rebuild the mirror.
+"""Stage 0b — push local `## Saved` statuses back to Simplify, then rebuild the mirror.
 
 This is the driver that makes the Saved flow runnable without a human in the loop. It wires
 the already-tested pieces together in the one order that is safe:
