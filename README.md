@@ -1,23 +1,51 @@
-# Job Search — Kiro-assisted tracker
+# Job Search — AI-assisted tracker
 
-Hunt for jobs by chatting with an AI agent. You talk to **Kiro** (or any other LLM),
-and it searches, filters, and keeps two tidy markdown tables up to date (guided by the included skills and steering files).
-There's also a little browser app for reviewing roles with a side-by-side job preview.
+Hunt for jobs by chatting with an AI agent. You talk to **Kiro**, **Gemini**, or any
+coding assistant that supports `.agents/` skills, and it searches, filters, and keeps
+tidy markdown tables up to date — guided by the included steering files and automation
+scripts. There's also a browser app for reviewing roles with a side-by-side job preview,
+and a desktop launcher for kicking off routines.
 
 ![The tracker.html UI showing a tiered, color-coded job shortlist](<./Example%20Screen.png>)
 
 > Sample data (fictional job seeker) shown above.
 
-## How to use it
+![The routine launcher — pick a workflow and the agent runs it](<./Routines.png>)
 
-1. **Tell Kiro about you.** Point it at your resume and fill in
+## Three ways to use it
+
+### 1. AI-generated suggestions *(the primary workflow)*
+
+1. **Tell the agent about you.** Point it at your resume and fill in
    `.kiro/steering/job-search-prefs.md` (profile, target roles, filters, location). It's
-   auto-loaded, so Kiro uses it on every request.
-2. **Ask for a search pass.** Just say *"run a job search pass."* Kiro syncs what you've
-   applied to from Simplify, searches the web, BuiltIn, and LinkedIn, reads the promising
-   listings, tiers them, and adds keepers to `shortlist.md`.
+   auto-loaded, so the agent uses it on every request.
+2. **Ask for a search pass.** Just say *"run a job search pass."* The agent syncs what
+   you've applied to from Simplify, searches the web, BuiltIn, and LinkedIn, reads the
+   promising listings, tiers them, and adds keepers to `shortlist.md`. Or use the routine
+   launcher (`python3 routine_launcher.py`) to pick which stages to run — it shows you the
+   stage plan and emits the prompt for the agent.
 3. **Review in the UI.** Open `tracker.html`, click a row to preview the job, tick `[x]`
    when you apply, or reject it with a reason.
+
+### 2. Manual saving while browsing
+
+While browsing any job board, paste a URL into `manual.md` (or use the tracker UI's
+manual-URL inbox). The agent reads the page, classifies the role, and files it into your
+shortlist or applied list. You can also save common searches in your
+[Simplify](https://simplify.jobs/) account and harvest them with the agent — it scrolls
+the client-side feed, captures the results, and deduplicates against what you've already
+seen.
+
+### 3. Scraping your watchlist
+
+Add target companies and their careers URLs to `watchlist.md` (via `tracker.html`'s
+Watchlist tab). The agent picks a CSS selector for each board, then
+`watchlist_scrape.py` scrapes new postings into an inbox you review in the tracker UI.
+Stale postings flush automatically into `applied.md` as `too-old` rejections, so nothing
+is re-suggested.
+
+All three paths feed the same `shortlist.md` / `applied.md` tables and the same
+`tracker.html` UI.
 
 ## The browser app (`tracker.html`)
 
@@ -32,28 +60,44 @@ files directly.
   navigates that pane on each row click.
 - **Edit:** tick the box to mark applied, or click ✕ to reject with a color-coded reason.
   Only the cell you touch gets rewritten. Rejected rows hide until you show them.
+- **Watchlist:** manage target companies, review scraped postings, and file or reject them.
+- **Manual inbox:** paste a job URL to save it for the agent to classify.
+
+## The routine launcher
+
+![The routine launcher UI](<./Routines.png>)
+
+The routine launcher is a desktop menu for your agent. Ask the agent to run
+`routine_launcher.py` — a picker dialog pops up listing the available routines (search
+pass, watchlist scrape, no-LLM sweep, maintenance, reject/flush, view in Chrome). Choose
+one and the launcher emits a prompt that the agent picks up and executes. You pick what to
+do; the agent does the work.
+
+Some routines — like the watchlist scrape or no-LLM sweep — are fully scripted and don't
+need the agent at all. For those, the launcher offers a **Run script directly** button
+that executes them on the spot.
 
 ## Extras you'll want
 
 The Simplify sync and split preview rely on the **Tab Share extension**
 ([`yoavdim/tab-share`](https://github.com/yoavdim/tab-share)) — a Chromium extension +
 native host exposing a local API at **`http://localhost:8766`**. It powers the split
-preview and the LinkedIn scripts. It's a standalone open-source project — clone it anywhere
-and follow its own install guide.
+preview, the LinkedIn scripts, and the watchlist scraper. It's a standalone open-source
+project — clone it anywhere and follow its own install guide.
 
 Without it, the tracker still views/edits your `.md` files and opens links in new tabs —
-you just lose the split preview and Simplify sync.
+you just lose the split preview, Simplify sync, and automated scraping.
 
 The **[Simplify](https://simplify.jobs/) Chrome extension** is a separate, optional tool
 worth grabbing. It autofills job application forms across most ATS platforms, which makes
-working through your shortlist a lot faster. Our workflow can also optionally read the
-applications you've submitted through Simplify and sync them into `applied.md`, so your
-tracker stays current without manual entry. We recommend using it alongside the tracker for
-quicker form filling.
+working through your shortlist a lot faster. The workflow also reads the applications
+you've submitted through Simplify and syncs them into `applied.md`, so your tracker stays
+current without manual entry. We recommend using it alongside the tracker for quicker form
+filling.
 
 ## Setup
 
-Easiest path: **ask Kiro to set it up.** The short version:
+Easiest path: **ask the agent to set it up.** The short version:
 
 1. Clone the [Tab Share repo](https://github.com/yoavdim/tab-share) somewhere convenient:
    `git clone https://github.com/yoavdim/tab-share.git`
@@ -62,7 +106,7 @@ Easiest path: **ask Kiro to set it up.** The short version:
 3. Register the native host with that ID: `chromium/install.sh <EXTENSION_ID>` (or
    `install_snap.sh <EXTENSION_ID>` for snap Chromium). Then reload the extension.
 4. Check it's alive: `curl -s http://localhost:8766/tabs` should return JSON.
-5. Fill in your profile, point Kiro at your resume, and ask for a search pass.
+5. Fill in your profile, point the agent at your resume, and ask for a search pass.
 
 > Full instructions (Firefox build, snap paths, troubleshooting) live in the repo's
 > `INSTALL.md`.
@@ -91,21 +135,25 @@ static HTML file:
 
 ## What's in here
 
-| File                                            | Purpose                                                                                          |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `.kiro/steering/search-playbook.md`           | The**method** — how Kiro searches, filters, dedups, and verifies. Auto-loaded.            |
-| `.kiro/steering/job-search-prefs.md`          | The**who/what** — your profile, goals, filters, priorities. *(Personal — keep local.)* |
-| `.kiro/scripts/linkedin_harvest.py`           | Harvests a full LinkedIn search / recommended collection.                                        |
-| `.kiro/scripts/read_jobs.py`                  | Reads full LinkedIn listings for triage.                                                         |
-| `shortlist.md`                                | Candidate roles, tiered, with status boxes + comments.*(Yours — local only.)*                 |
-| `applied.md`                                  | Applied / saved / rejected tracker; dedup source.*(Yours — local only.)*                      |
-| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data** so the repo runs out of the box.                                   |
-| `tracker.html`                                | Browser UI over the two`.md` files.                                                            |
+| File | Purpose |
+| --- | --- |
+| `.kiro/steering/` | Steering files — search playbook, job preferences, run config, watchlist scraper instructions. Auto-loaded by the agent. |
+| `.kiro/skills/simplify-tracker-sync/` | Agent skill for syncing the Simplify.jobs tracker + harvesting saved searches. |
+| `routine_launcher.py` | PyQt5 desktop launcher — pick a routine, get the prompt. |
+| `tracker.html` | Browser UI over the `.md` files. |
+| `shortlist.md` | Candidate roles, tiered, with status boxes + comments. *(Yours — local only.)* |
+| `applied.md` | Applied / saved / rejected tracker; dedup source. *(Yours — local only.)* |
+| `watchlist.md` | Company watchlist + scraped-postings inbox. *(Yours — local only.)* |
+| `manual.md` | URL inbox — paste a job link and the agent files it. *(Yours — local only.)* |
+| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data**.|
 
-> Your real `shortlist.md` / `applied.md` are **git-ignored** so personal data never gets
-> committed. Only the `*.sample.md` files ship with the repo. To start: copy a sample to the
-> real name (`cp shortlist.sample.md shortlist.md`), or open a sample straight from
-> `tracker.html` via **Open file(s)…**.
+> `.agents/` is a symlink to `.kiro/`, so the skills and steering files are discoverable
+> by any AI coding tool that follows the `.agents/` convention.
+
+> Your real `shortlist.md` / `applied.md` / `watchlist.md` / `manual.md` are **git-ignored**
+> so personal data never gets committed. Only the `*.sample.md` files ship with the repo. To
+> start: copy a sample to the real name (`cp shortlist.sample.md shortlist.md`), or open a
+> sample straight from `tracker.html` via **Open file(s)…**.
 
 ## License
 
