@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "lib"))
-import tab_share as TS
+from chrome_interface import ChromeInterface
 
 
 # Simplify status codes (confirmed from the app bundle: SAVED=1, APPLIED=2)
@@ -246,7 +246,7 @@ def find_tracker_tab(tab_share_url="http://localhost:8766"):
     None means the tracker isn't open (callers should fail loudly, not fall
     through to whatever tab happens to be active).
     """
-    for t in TS.tabs(base=tab_share_url, timeout=6):
+    for t in ChromeInterface(base=tab_share_url).tabs():
         url = t.get("url") or ""
         if "simplify.jobs" in url and "/tracker" in url:
             return t
@@ -286,8 +286,8 @@ def execute_via_tab_share(plan, tab_share_url="http://localhost:8766", dry_run=T
 
     eval_code = _build_eval_code(plan)
 
-    resp_data, err = TS.post_raw(
-        "/eval", {"code": eval_code, "tabId": tab_id}, base=tab_share_url, timeout=30)
+    resp_data, err = ChromeInterface(base=tab_share_url).post_raw(
+        "/eval", {"code": eval_code, "tabId": tab_id}, timeout=30)
     if err:
         result["status"] = "error"
         result["error"] = err

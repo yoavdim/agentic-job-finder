@@ -125,6 +125,7 @@ class WorkspaceCase(unittest.TestCase):
 LIB = SCRIPTS / "lib"
 
 ALL_SCRIPTS = [
+    LIB / "chrome_interface.py",
     LIB / "md_tables.py",
     LIB / "jobdates.py",
     LIB / "reasons.py",
@@ -138,6 +139,9 @@ ALL_SCRIPTS = [
     SCRIPTS / "ensure_data_files.py",
     SCRIPTS / "run_config_check.py",
     SCRIPTS / "check_browser_saved.py",
+    SCRIPTS / "watchlist_scrape.py",
+    SCRIPTS / "watchlist_selectors.py",
+    SCRIPTS / "watchlist_flush.py",
     SKILL_SCRIPTS / "parse_tracker.py",
     SKILL_SCRIPTS / "simplify_actions.py",
 ]
@@ -162,7 +166,8 @@ class ImportAndHelpTests(unittest.TestCase):
         # prove the entry point can resolve the names it references.
         cli = [p for p in ALL_SCRIPTS
                if p.name not in ("md_tables.py", "jobdates.py", "reasons.py",
-                                 "candidate_lint.py", "simplify_actions.py")]
+                                 "candidate_lint.py", "chrome_interface.py",
+                                 "simplify_actions.py")]
         for path in cli:
             with self.subTest(script=path.name):
                 rc, out, err = run([path, "--help"], cwd=SCRIPTS)

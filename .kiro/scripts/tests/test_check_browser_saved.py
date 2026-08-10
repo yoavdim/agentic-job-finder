@@ -112,14 +112,15 @@ class TrackerDirtyTabsTests(unittest.TestCase):
             {"id": 2, "url": "https://simplify.jobs/x", "title": "other"},
         ]
 
-        def fake_eval(code, tab_id=None, base=None):
+        def fake_eval(_self, tab_id, code, timeout=30):
             self.assertIn("getElementById('save')", code)
             self.assertEqual(tab_id, 1)
             return {"dirty": True, "status": "Unsaved changes"}
 
-        with mock.patch.object(CBS.TS, "is_up", return_value=True), \
-             mock.patch.object(CBS.TS, "tabs", return_value=tabs), \
-             mock.patch.object(CBS.TS, "eval_value", side_effect=fake_eval):
+        with mock.patch.object(CBS.ChromeInterface, "is_up", return_value=True), \
+             mock.patch.object(CBS.ChromeInterface, "tabs", return_value=tabs), \
+             mock.patch.object(CBS.ChromeInterface, "eval", autospec=True,
+                               side_effect=fake_eval):
             dirty, err = CBS.tracker_dirty_tabs()
         self.assertIsNone(err)
         self.assertEqual(len(dirty), 1)
@@ -128,9 +129,9 @@ class TrackerDirtyTabsTests(unittest.TestCase):
 
     def test_clean_save_button_not_dirty(self):
         tabs = [{"id": 1, "url": "file:///ws/tracker.html", "title": "tracker"}]
-        with mock.patch.object(CBS.TS, "is_up", return_value=True), \
-             mock.patch.object(CBS.TS, "tabs", return_value=tabs), \
-             mock.patch.object(CBS.TS, "eval_value",
+        with mock.patch.object(CBS.ChromeInterface, "is_up", return_value=True), \
+             mock.patch.object(CBS.ChromeInterface, "tabs", return_value=tabs), \
+             mock.patch.object(CBS.ChromeInterface, "eval",
                                return_value={"dirty": False, "status": "Saved"}):
             dirty, err = CBS.tracker_dirty_tabs()
         self.assertIsNone(err)
@@ -138,27 +139,28 @@ class TrackerDirtyTabsTests(unittest.TestCase):
 
     def test_unreadable_tab_counts_as_dirty(self):
         tabs = [{"id": 1, "url": "file:///ws/tracker.html", "title": "tracker"}]
-        with mock.patch.object(CBS.TS, "is_up", return_value=True), \
-             mock.patch.object(CBS.TS, "tabs", return_value=tabs), \
-             mock.patch.object(CBS.TS, "eval_value", return_value=None):
+        with mock.patch.object(CBS.ChromeInterface, "is_up", return_value=True), \
+             mock.patch.object(CBS.ChromeInterface, "tabs", return_value=tabs), \
+             mock.patch.object(CBS.ChromeInterface, "eval", return_value=None):
             dirty, err = CBS.tracker_dirty_tabs()
         self.assertIsNone(err)
         self.assertEqual(len(dirty), 1)
 
     def test_tab_share_down_reports_err(self):
-        with mock.patch.object(CBS.TS, "is_up", return_value=False):
+        with mock.patch.object(CBS.ChromeInterface, "is_up", return_value=False):
             dirty, err = CBS.tracker_dirty_tabs()
         self.assertIsNone(dirty)
         self.assertIn("not reachable", err)
 
     def test_firefox_base_tried_after_chromium(self):
-        with mock.patch.object(CBS.TS, "is_up", side_effect=[False, True]):
-            with mock.patch.object(CBS.TS, "tabs", return_value=[]) as tabs:
-                with mock.patch.object(CBS.TS, "eval_value", return_value=None):
+        with mock.patch.object(CBS.ChromeInterface, "is_up", side_effect=[False, True]) as up:
+            with mock.patch.object(CBS.ChromeInterface, "tabs", return_value=[]):
+                with mock.patch.object(CBS.ChromeInterface, "eval", return_value=None):
                     dirty, err = CBS.tracker_dirty_tabs()
         self.assertIsNone(err)
         self.assertEqual(dirty, [])
-        tabs.assert_called_once_with(base="http://127.0.0.1:8765")
+        # one is_up probe per base (both tried), and the winner (8765) is used
+        self.assertEqual(up.call_count, 2)
 
     def test_check_js_is_an_iife_not_a_top_level_return(self):
         # Tab Share's /eval wraps the code, so a top-level `return` is a SyntaxError

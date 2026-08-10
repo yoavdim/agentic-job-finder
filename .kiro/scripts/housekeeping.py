@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import md_tables as M
-import tab_share as TS
+from chrome_interface import ChromeInterface
 
 SEARCHED_RE = re.compile(r"^\*\*Last searched the web:\*\*\s*.*$")
 SYNCED_RE = re.compile(r"^\*\*Last synced from Simplify:\*\*\s*.*$")
@@ -68,64 +68,21 @@ def sync_header(lines, date):
     return lines, "missing", (n_applied, n_saved)
 
 
-def _post(path, payload, timeout=20):
-    # post_raw (not tab_share.post): callers here need a raised-looking failure to
-    # distinguish "the call errored" from "{} came back empty", which the retrying
-    # post() can't tell apart (see close_scratch's error-vs-zero-closed comment below).
-    resp, err = TS.post_raw(path, payload, timeout=timeout)
-    if err:
-        raise RuntimeError(err)
-    return resp
-
-
-def list_tabs(timeout=5):
-    return TS.get("/tabs", timeout=timeout)
-
-
-def host_of(url):
-    m = re.match(r"https?://([^/:]+)", url or "")
-    return m.group(1).lower() if m else ""
-
-
 def close_scratch(group="Scratch"):
     """Close every tab in the `group` tab group. Returns (closed, rejected, error).
 
-    The extension's `/close` gate requires BOTH `expectHost` and `expectGroup`
-    (verified: a group-only call answers `{"error": "expectHost required (safety)"}`),
-    and `/tabs` does not report group membership — so the group filter can only be
-    applied server-side. We therefore enumerate the distinct hosts that are open and
-    issue one gated call per host. A tab closes only when it matches the host AND is
-    in `group`, so keepers in "Job Search" can never be caught by this.
+    Delegates to `ChromeInterface.close_group`, which keeps the extension's close gate
+    honest: `/close` requires BOTH `expectHost` and `expectGroup` (verified: a
+    group-only call answers `{"error": "expectHost required (safety)"}`), and `/tabs`
+    does not report group membership — so the group filter can only be applied
+    server-side. The interface therefore enumerates the distinct hosts that are open and
+    issues one gated call per host. A tab closes only when it matches the host AND is in
+    `group`, so keepers in "Job Search" can never be caught by this.
 
     An `error` reply is returned as a real failure rather than being counted as
     "0 closed", which is how the earlier group-only call looked like a success.
     """
-    tabs = list_tabs()
-    if tabs is None:
-        return 0, 0, "Tab Share not reachable on :8766"
-
-    hosts = sorted({h for h in (host_of(t.get("url")) for t in tabs.get("tabs", [])) if h})
-    if not hosts:
-        return 0, 0, None
-
-    closed = rejected = 0
-    errors = []
-    for host in hosts:
-        try:
-            res = _post("/close", {"expectGroup": group, "expectHost": host})
-        except Exception as e:
-            errors.append(f"{host}: {e}")
-            continue
-        if isinstance(res, dict) and res.get("error"):
-            errors.append(f"{host}: {res['error']}")
-            continue
-        closed += len(res.get("closed") or [])
-        # host-mismatch rejections are expected noise here: every call is scoped to one
-        # host, so tabs on the other hosts are rejected by design. Anything else is real.
-        for rej in res.get("rejected") or []:
-            if rej.get("why") != "host-mismatch":
-                rejected += 1
-    return closed, rejected, "; ".join(errors) if errors else None
+    return ChromeInterface().close_group(group)
 
 
 def main():

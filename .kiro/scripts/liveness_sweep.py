@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import jobdates as JD
 import md_tables as M
 import migrate_resolved as MR
-import tab_share as TS
+from chrome_interface import ChromeInterface
 
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/126.0 Safari/537.36")
@@ -136,30 +136,32 @@ def http_probe(url, timeout=15):
 
 SCRATCH_GROUP = "Scratch"
 
+_CI = None
+
+
+def _interface():
+    """One shared ChromeInterface for the whole run (lazy; survives tab opens/evals)."""
+    global _CI
+    if _CI is None:
+        _CI = ChromeInterface()
+    return _CI
+
 
 def render_text(url, timeout=45):
     """Rendered page text via Tab Share /extract. Returns (text, error).
 
-    Opens `url` in its own tab and extracts BY that tab's id. `TS.extract(url=...)` alone
-    does not open the URL — /extract with no tabId silently reads whatever tab is currently
-    active (verified directly: it returned an unrelated open tab's content, `ok: True`, with
-    no error). This function used to rely on that bare-url path, so a liveness check could
-    silently read the wrong page and misjudge a role as alive/dead based on unrelated tab
-    content — exactly the kind of failure §8 exists to catch, happening inside the checker
-    itself. `groupName` puts the opened tab in Scratch so `housekeeping.py --close-scratch`
-    reaps it at the end of the pass (playbook §3); the tab is also closed here directly so a
-    caller checking many URLs in a loop doesn't accumulate one open tab per URL.
+    Delegates to `ChromeInterface.extract_text`, which opens `url` in its own tab and
+    extracts BY that tab's id. /extract with no tabId silently reads whatever tab is
+    currently active (verified directly: it returned an unrelated open tab's content,
+    `ok: True`, with no error). This function used to rely on that bare-url path, so a
+    liveness check could silently read the wrong page and misjudge a role as alive/dead
+    based on unrelated tab content — exactly the kind of failure §8 exists to catch,
+    happening inside the checker itself. `groupName` puts the opened tab in Scratch so
+    `housekeeping.py --close-scratch` reaps it at the end of the pass (playbook §3); the
+    tab is also closed here directly so a caller checking many URLs in a loop doesn't
+    accumulate one open tab per URL.
     """
-    tab_id = TS.open_tab(url, group_name=SCRATCH_GROUP, timeout=timeout)
-    if not tab_id:
-        return "", "could not open a tab for this URL"
-    try:
-        data = TS.extract(tab_id=tab_id, timeout=timeout)
-        if not data:
-            return "", "extract failed or timed out"
-        return (data.get("text") or "") + " " + (data.get("title") or ""), None
-    finally:
-        TS.close(tab_ids=[tab_id], expect_group=SCRATCH_GROUP, expect_host=host_of(url))
+    return _interface().extract_text(url, timeout=timeout)
 
 
 def find_marker(text):
@@ -171,7 +173,7 @@ def find_marker(text):
 
 
 def tab_share_up():
-    return TS.is_up()
+    return _interface().is_up()
 
 
 def check_url(url, use_browser):

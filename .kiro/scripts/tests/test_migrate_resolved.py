@@ -47,6 +47,22 @@ APPLIED = """# Applied
 
 TODAY = "2026-07-29"
 
+MANUAL = """# Manual URL additions
+
+Inbox.
+
+## Entries
+
+| Added | URL | Status | Comment |
+|---|---|---|---|
+| 2026-08-04 | [Embedded Dev Engineer](<https://acme.recruitee.com/o/embedded-dev-engineer>) | applied |  |
+| 2026-08-04 | [Compiler Engineer](<https://huaweicanada.recruitee.com/o/compiler-engineer-2-16>) | rejected | not-interested — too far |
+| 2026-08-04 | [Listing Removed Role](<https://gone.recruitee.com/o/listing-removed-role>) | rejected | listing-removed — delisted |
+| 2026-08-04 | [Untagged Role](<https://untagged.recruitee.com/o/untagged-role>) | rejected |  |
+| 2026-08-04 | [Unresolvable Role](<https://careers.amd.com/careers-home/jobs/88614>) | rejected | not-qualified — too senior |
+| 2026-08-04 | [Saved Role](<https://saved.recruitee.com/o/saved-role>) | saved |  |
+"""
+
 
 class ReasonClassificationTests(unittest.TestCase):
     def test_reads_the_code_the_reject_dialog_wrote(self):
@@ -105,6 +121,69 @@ class PlanTests(unittest.TestCase):
 
     def test_every_resolved_row_is_marked_for_deletion(self):
         self.assertEqual(len(self.actions["delete"]), 4)   # 2 [x] + 2 [nope]
+
+
+class PlanManualTests(unittest.TestCase):
+    def setUp(self):
+        self.manual = MANUAL.split("\n")
+        self.actions = MR.plan_manual(self.manual, APPLIED.split("\n"),
+                                      today=TODAY)
+
+    def _rejected(self, role):
+        return next(a for a in self.actions["rejected_new"] if a["role"] == role)
+
+    def test_rejected_row_is_classified_from_the_comment(self):
+        entry = self._rejected("Compiler engineer 2 16")
+        self.assertEqual(entry["company"], "Huaweicanada")
+        self.assertEqual(entry["reason"], "not-interested")
+        self.assertEqual(entry["comment"], "not-interested — too far")
+
+    def test_rejected_row_is_stamped_with_the_drain_date(self):
+        self.assertEqual(self._rejected("Compiler engineer 2 16")["date"], TODAY)
+
+    def test_rejected_row_without_a_comment_reason_is_unknown(self):
+        self.assertEqual(self._rejected("Untagged role")["reason"], "unknown")
+
+    def test_rejected_rows_are_marked_for_deletion(self):
+        self.assertEqual(len(self.actions["manual_delete"]), 4)
+
+    def test_applied_row_still_drains_to_applied(self):
+        entry = next(a for a in self.actions["manual_new"]
+                     if a["role"] == "Embedded dev engineer")
+        self.assertEqual(entry["date"], "2026-08-04")
+
+    def test_unresolvable_rejected_row_is_left_in_place(self):
+        left = [l for l in self.actions["manual_left"] if l["status"] == "rejected"]
+        self.assertEqual(len(left), 1)
+        self.assertIn("careers.amd.com", left[0]["url"])
+        self.assertIn("stage 0c", left[0]["why"])
+
+    def test_saved_row_is_left_alone(self):
+        left = [l for l in self.actions["manual_left"] if l["status"] == "saved"]
+        self.assertEqual(len(left), 1)
+        self.assertNotIn("Saved role", [a["role"] for a in self.actions["manual_new"]])
+
+
+class PlanManualApplyTests(unittest.TestCase):
+    def setUp(self):
+        self.manual = MANUAL.split("\n")
+        self.applied = APPLIED.split("\n")
+        actions = MR.plan_manual(self.manual, self.applied, today=TODAY)
+        self.sl, self.applied, self.manual = MR.apply_plan(
+            self.manual, self.applied, actions, self.manual)
+
+    def test_rejected_row_lands_in_rejected_with_reason_and_verbatim(self):
+        t = M.find_table(self.applied, "## Rejected")
+        hw = next(r for r in t.rows if r.get("company") == "Huaweicanada")
+        self.assertEqual(hw.get("reason"), "not-interested")
+        self.assertEqual(hw.get("comment"), "not-interested — too far")
+        self.assertEqual(hw.get("date"), TODAY)
+
+    def test_drained_rejected_row_is_gone_from_the_inbox(self):
+        text = "\n".join(self.manual)
+        self.assertNotIn("compiler-engineer", text)
+        self.assertNotIn("listing-removed-role", text)
+        self.assertIn("Saved Role", text)
 
 
 class ApplyTests(unittest.TestCase):

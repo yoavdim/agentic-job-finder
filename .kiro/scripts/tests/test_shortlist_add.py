@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import md_tables as M
 import shortlist_add as SA
 import housekeeping as HK
+from chrome_interface import ChromeInterface
 
 SHORTLIST = """# Job Shortlist
 
@@ -246,44 +247,51 @@ class HousekeepingTests(unittest.TestCase):
         HK.bump_searched(original, TODAY)
         self.assertEqual(original, snapshot)
 
-    @patch.object(HK, "list_tabs", return_value=None)
-    def test_close_scratch_reports_when_tab_share_is_down(self, _t):
+    @patch.object(ChromeInterface, "close_group", return_value=(0, 0, "Tab Share not reachable"))
+    def test_close_scratch_reports_when_tab_share_is_down(self, _cg):
         closed, rejected, err = HK.close_scratch()
         self.assertEqual(closed, 0)
         self.assertIn("not reachable", err)
 
-    @patch.object(HK, "list_tabs", return_value={"tabs": [
-        {"url": "https://builtintoronto.com/job/a/1"},
-        {"url": "https://builtintoronto.com/job/b/2"},
-        {"url": "https://www.linkedin.com/jobs/view/3/"},
-    ]})
-    @patch.object(HK, "_post", return_value={"closed": [1, 2], "rejected": []})
-    def test_close_scratch_sends_both_gate_fields_per_host(self, post, _t):
-        closed, rejected, err = HK.close_scratch("Scratch")
-        self.assertIsNone(err)
+    def test_close_group_sends_both_gate_fields_per_host(self):
         # /close requires BOTH expectHost and expectGroup; /tabs exposes no group info,
         # so the call is issued once per distinct host and the extension filters by group.
+        import chrome_interface as CI
+        ci = ChromeInterface()
+        with patch.object(CI.TS, "get", return_value={"tabs": [
+                {"url": "https://builtintoronto.com/job/a/1"},
+                {"url": "https://builtintoronto.com/job/b/2"},
+                {"url": "https://www.linkedin.com/jobs/view/3/"},
+        ]}), patch.object(CI.TS, "post_raw",
+                          return_value=({"closed": [1, 2], "rejected": []}, None)) as post:
+            closed, rejected, err = ci.close_group("Scratch")
+        self.assertIsNone(err)
         hosts = sorted(c.args[1]["expectHost"] for c in post.call_args_list)
         self.assertEqual(hosts, ["builtintoronto.com", "www.linkedin.com"])
         for c in post.call_args_list:
             self.assertEqual(c.args[1]["expectGroup"], "Scratch")
         self.assertEqual(closed, 4)   # 2 per host call
 
-    @patch.object(HK, "list_tabs", return_value={"tabs": [{"url": "https://x.com/a"}]})
-    @patch.object(HK, "_post", return_value={"error": "expectHost required (safety)"})
-    def test_close_scratch_surfaces_an_error_reply_as_failure(self, _p, _t):
+    def test_close_group_surfaces_an_error_reply_as_failure(self):
         # the old group-only call got this reply and reported "closed 0" as success
-        closed, rejected, err = HK.close_scratch("Scratch")
+        import chrome_interface as CI
+        ci = ChromeInterface()
+        with patch.object(CI.TS, "get", return_value={"tabs": [{"url": "https://x.com/a"}]}):
+            with patch.object(CI.TS, "post_raw",
+                              return_value=({"error": "expectHost required (safety)"}, None)):
+                closed, rejected, err = ci.close_group("Scratch")
         self.assertEqual(closed, 0)
         self.assertIn("expectHost required", err)
 
-    @patch.object(HK, "list_tabs", return_value={"tabs": [{"url": "https://x.com/a"}]})
-    @patch.object(HK, "_post", return_value={"closed": [], "rejected": [
-        {"why": "host-mismatch", "host": "other.com"},
-        {"why": "group-mismatch"},
-    ]})
-    def test_host_mismatch_rejections_are_expected_noise(self, _p, _t):
-        closed, rejected, err = HK.close_scratch("Scratch")
+    def test_host_mismatch_rejections_are_expected_noise(self):
+        import chrome_interface as CI
+        ci = ChromeInterface()
+        with patch.object(CI.TS, "get", return_value={"tabs": [{"url": "https://x.com/a"}]}):
+            with patch.object(CI.TS, "post_raw", return_value=({"closed": [], "rejected": [
+                    {"why": "host-mismatch", "host": "other.com"},
+                    {"why": "group-mismatch"},
+            ]}, None)):
+                closed, rejected, err = ci.close_group("Scratch")
         self.assertIsNone(err)
         # one call per host means other hosts are rejected by design; only the
         # group-mismatch is a real rejection worth reporting

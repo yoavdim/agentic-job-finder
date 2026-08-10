@@ -192,5 +192,43 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(v.bucket, "applied")
 
 
+class ManualRejectedIndexTests(unittest.TestCase):
+    """A `rejected` row still sitting in the manual.md inbox must be bucketed by its
+    reason, exactly like a `## Rejected` row — NOT as `saved`. Bucketing it `saved`
+    blacklisted liveness rejections (skip=True) and outranked the real rejection."""
+
+    def _idx(self, manual):
+        return DedupIndex.from_lines([], [], manual.split("\n"))
+
+    def test_judgment_rejection_in_the_inbox_blacklists(self):
+        manual = ("# Manual\n\n## Entries\n\n"
+                  "| Added | URL | Status | Comment |\n|---|---|---|---|\n"
+                  "| 2026-08-04 | [X](<https://acme.recruitee.com/o/x>) | rejected "
+                  "| not-interested — too far |\n")
+        v = self._idx(manual).check("Acme", "X",
+                                    "https://acme.recruitee.com/o/x")
+        self.assertEqual(v.bucket, "rejected-judgment")
+        self.assertTrue(v.skip)
+
+    def test_liveness_rejection_in_the_inbox_stays_resuggestable(self):
+        manual = ("# Manual\n\n## Entries\n\n"
+                  "| Added | URL | Status | Comment |\n|---|---|---|---|\n"
+                  "| 2026-08-04 | [X](<https://gone.recruitee.com/o/x>) | rejected "
+                  "| listing-removed — delisted |\n")
+        v = self._idx(manual).check("Gone", "X",
+                                    "https://gone.recruitee.com/o/x")
+        self.assertEqual(v.bucket, "rejected-liveness")
+        self.assertFalse(v.skip)
+
+    def test_unreasoned_rejection_in_the_inbox_is_unclear(self):
+        manual = ("# Manual\n\n## Entries\n\n"
+                  "| Added | URL | Status | Comment |\n|---|---|---|---|\n"
+                  "| 2026-08-04 | [X](<https://huh.recruitee.com/o/x>) | rejected |  |\n")
+        v = self._idx(manual).check("Huh", "X",
+                                    "https://huh.recruitee.com/o/x")
+        self.assertEqual(v.bucket, "rejected-unclear")
+        self.assertFalse(v.skip)
+
+
 if __name__ == "__main__":
     unittest.main()

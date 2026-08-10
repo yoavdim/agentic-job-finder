@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
-import tab_share as TS
+from chrome_interface import ChromeInterface
 
 # Chromium first (DEFAULT_BASE), then Firefox. Tab Share listens on 127.0.0.1:8766/8765.
 _BASES = ("http://127.0.0.1:8766", "http://127.0.0.1:8765")
@@ -45,15 +45,16 @@ def tracker_dirty_tabs(bases=_BASES):
     clean. `err` is None normally, or a description when no Tab Share instance is reachable
     (then `dirty` is None).
     """
-    base = next((b for b in bases if TS.is_up(b)), None)
+    base = next((b for b in bases if ChromeInterface(base=b).is_up()), None)
     if base is None:
         return None, "Tab Share not reachable on " + ", ".join(bases)
+    ci = ChromeInterface(base=base)
     dirty = []
-    for t in TS.tabs(base=base):
+    for t in ci.tabs():
         url = t.get("url") or ""
         if "tracker.html" not in url:
             continue
-        st = TS.eval_value(_CHECK_JS, tab_id=t.get("id"), base=base)
+        st = ci.eval(t.get("id"), _CHECK_JS)
         if st is None or st.get("dirty"):
             dirty.append({"title": t.get("title") or url, "url": url,
                           "status": (st or {}).get("status", "")})

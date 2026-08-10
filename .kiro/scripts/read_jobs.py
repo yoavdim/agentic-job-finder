@@ -7,13 +7,11 @@ import time,sys,re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import tab_share as TS
+from chrome_interface import ChromeInterface
+
+_CI = ChromeInterface()
 
 POOL=5
-def post(p,b,t=35):
-    resp, err = TS.post_raw(p,b,timeout=t)
-    return {"error": err} if err else resp
-
 def chunks(l,n):
     for i in range(0,len(l),n): yield l[i:i+n]
 
@@ -37,11 +35,10 @@ ids=sys.argv[1:]
 for batch in chunks(ids,POOL):
     tabmap={}
     for jid in batch:
-        r=post("/open",{"url":"https://www.linkedin.com/jobs/view/%s/"%jid,"groupName":"Scratch"})
-        tabmap[jid]=r.get("tabId")
+        tabmap[jid]=_CI.open("https://www.linkedin.com/jobs/view/%s/"%jid)
     time.sleep(9)  # let the description body render
     for jid in batch:
-        d=post("/extract",{"tabId":tabmap[jid]})
+        d=_CI.extract(tabmap[jid])
         t=d.get("text","") or ""
         low=t.lower()
         removed=any(m in low for m in ["no longer accepting","no longer available","this job is no longer"])
@@ -57,4 +54,4 @@ for batch in chunks(ids,POOL):
             print("(sections not found — body may not have rendered) head:", clean(t[:200]))
     tids=[v for v in tabmap.values() if v]
     if tids:
-        post("/close",{"tabId":tids,"expectHost":"www.linkedin.com","expectGroup":"Scratch"})
+        _CI.close(tids, expect_host="www.linkedin.com")

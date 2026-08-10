@@ -32,7 +32,8 @@ ALIASES = {
     "role":     ["role", "title"],
     "raw":      ["raw"],
     "location": ["location"],
-    "apply":    ["apply link", "apply", "link"],
+    "apply":    ["apply link", "apply", "link", "url"],
+    "selector": ["css selector", "selector"],
     "notes":    ["notes", "note"],
     "simplify": ["simplify"],
     "reason":   ["reason"],
@@ -221,6 +222,22 @@ def insert_rows(lines, heading_prefix, new_rows, newest_first=True):
     return lines[:at] + list(new_rows) + lines[at:]
 
 
+def ensure_table(lines, heading, headers):
+    """Append a table (heading + header + separator) at the end of `lines` if no table
+    exists under that heading; otherwise return `lines` unchanged.
+
+    `heading` is the full markdown heading, e.g. '## Scraped (watchlist)'. The watchlist
+    scripts use this to create their target tables on the first write.
+    """
+    if find_table(lines, heading) is not None:
+        return lines
+    out = list(lines)
+    while out and out[-1] == "":
+        out.pop()
+    block = ["", heading, "", row_md(headers), row_md(["---"] * len(headers))]
+    return out + block
+
+
 # ---------- URL / dedup helpers ----------
 
 # Markdown allows both `[text](url)` and `[text](<url>)`; tracker.html writes the angle
@@ -380,7 +397,7 @@ def read_lines(path):
 # mutator therefore snapshots the file it is about to overwrite. Cheap insurance — these
 # files are a few KB — and it turns "the dry run looked right" into "I can get it back
 # either way".
-BACKUP_DIR = ".kiro/backups"
+BACKUP_DIR = str(Path(__file__).resolve().parent.parent.parent / "backups")
 BACKUP_KEEP = 20
 
 

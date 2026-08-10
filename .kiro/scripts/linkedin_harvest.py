@@ -19,13 +19,12 @@ import json, re, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import tab_share as TS
+from chrome_interface import ChromeInterface
 
-def post(path, body, timeout=30, retries=2):
-    return TS.post(path, body, timeout=timeout, retries=retries)
+_CI = ChromeInterface()
 
 def tabs():
-    return TS.tabs()
+    return _CI.tabs()
 
 def set_start(url, n):
     u = re.sub(r"([?&])start=\d+", r"\1start=%d" % n, url)
@@ -99,16 +98,15 @@ def harvest(url, max_tabs=POOL, collection=False, max_batches=None):
     def fetch_batch(starts):
         tabs_ = {}
         for n in starts:
-            r = post("/open", {"url": set_start(url, n), "groupName": "Scratch"})
-            tabs_[n] = r.get("tabId")
+            tabs_[n] = _CI.open(set_start(url, n))
         time.sleep(COLLECTION_WAIT if collection else 7)  # single wait for the whole batch to render
         out = {}
         for n, tid in tabs_.items():
-            out[n] = post("/extract", {"tabId": tid} if tid else {"url": set_start(url, n)})
+            out[n] = _CI.extract(tid) if tid else {"text": "", "links": []}
         # close the batch (gated)
         tids = [t for t in tabs_.values() if t]
         if tids:
-            post("/close", {"tabId": tids, "expectHost": "www.linkedin.com", "expectGroup": "Scratch"})
+            _CI.close(tids, expect_host="www.linkedin.com")
         return out
 
     # Page 0 first (sequential) to learn the step size + header total.
@@ -175,7 +173,7 @@ def harvest(url, max_tabs=POOL, collection=False, max_batches=None):
 def cleanup_scratch():
     # Close any LinkedIn tabs left in the Scratch group (belt-and-suspenders vs. mid-run crashes).
     try:
-        post("/close", {"expectGroup": "Scratch", "expectHost": "www.linkedin.com"}, retries=0)
+        _CI.close(tab_ids=None, expect_host="www.linkedin.com")
     except Exception:
         pass
 

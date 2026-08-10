@@ -31,7 +31,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "lib"))
-import tab_share as TS
+from chrome_interface import ChromeInterface
+
+_CI = ChromeInterface()
 
 JOBS_ORIGIN = "https://simplify.jobs"
 PAGE_1_SEED_SLEEP = 7.0   # initial render before the seed parse
@@ -43,17 +45,13 @@ ARRANGEMENT_RE = re.compile(r"^(In Person|Hybrid|Remote)$", re.I)
 HEADER_RE = re.compile(r"Showing\s+([\d,]+)\s+of\s+([\d,]+)\s+Jobs")
 
 
-def post(path, body, timeout=30, retries=2):
-    return TS.post(path, body, timeout=timeout, retries=retries)
-
-
 def tabs():
-    return TS.tabs()
+    return _CI.tabs()
 
 
 def eval_value(code, tab_id=None):
     """POST /eval and return the value (or None on failure)."""
-    return TS.eval_value(code, tab_id=tab_id)
+    return _CI.eval(tab_id, code)
 
 
 # ---- pure parsing / merging (unit-tested) ----
@@ -210,26 +208,6 @@ def js_page_info():
             ' total: m ? parseInt(m[2].replace(/,/g,"")) : 0 }; })()')
 
 
-def js_scroll_bottom():
-    return ('(function(){ var c = document.querySelector("[data-testid=job-card]");'
-            ' if (!c) return "no-cards"; var el = c;'
-            ' while (el && el.scrollHeight <= el.clientHeight + 50 && el.parentElement){ el = el.parentElement; }'
-            ' if (el && el.scrollHeight > el.clientHeight + 50){ el.scrollTop = el.scrollHeight; }'
-            ' return el ? (el.scrollTop + "/" + el.scrollHeight) : "none"; })()')
-
-
-def js_scroll_wiggle():
-    """Nudge the results container up a little, then back to the bottom — a
-    stalled lazy-loader usually resumes on the second nudge."""
-    return ('(function(){ var c = document.querySelector("[data-testid=job-card]");'
-            ' if (!c) return "no-cards"; var el = c;'
-            ' while (el && el.scrollHeight <= el.clientHeight + 50 && el.parentElement){ el = el.parentElement; }'
-            ' if (!el) return "none";'
-            ' el.scrollTop = Math.max(0, el.scrollTop - 600);'
-            ' el.scrollTop = el.scrollHeight;'
-            ' return el.scrollTop + "/" + el.scrollHeight; })()')
-
-
 def js_install_hook():
     """Record every Typesense multi_search response into window.__sjobs.
 
@@ -325,10 +303,10 @@ def harvest(label="Toronto", max_rounds=None, max_jobs=300, max_age_days=None,
     origin = find_simplify_tab()
     opened_origin = False
     if origin is None:
-        r = post("/open", {"url": JOBS_ORIGIN + "/jobs", "groupName": "Scratch"})
-        if not r.get("tabId"):
+        tid = _CI.open(JOBS_ORIGIN + "/jobs")
+        if not tid:
             return {"error": "could not open a simplify.jobs tab; is Chromium (port 8766) up and logged in?"}
-        origin = {"tabId": r["tabId"], "url": JOBS_ORIGIN + "/jobs"}
+        origin = {"tabId": tid, "url": JOBS_ORIGIN + "/jobs"}
         opened_origin = True
         time.sleep(PAGE_1_SEED_SLEEP)
 
@@ -337,8 +315,7 @@ def harvest(label="Toronto", max_rounds=None, max_jobs=300, max_age_days=None,
         return {"error": err}
 
     url = JOBS_ORIGIN + "/jobs?" + query
-    r = post("/open", {"url": url, "groupName": "Scratch"})
-    tid = r.get("tabId")
+    tid = _CI.open(url)
     if not tid:
         return {"error": "could not open the search URL in a Scratch tab"}
 
@@ -382,7 +359,7 @@ def harvest(label="Toronto", max_rounds=None, max_jobs=300, max_age_days=None,
         rounds = 0
         while rounds < cap:
             rounds += 1
-            eval_value(js_scroll_bottom(), tab_id=tid)
+            _CI.scroll_container(tid, "[data-testid=job-card]")
             time.sleep(wait if rounds % 3 else SCROLL_SLEEP_LAST)
             info = eval_value(js_page_info(), tab_id=tid) or {}
             jobs = [j for j in (parse_multi_search_doc(d)
@@ -407,7 +384,7 @@ def harvest(label="Toronto", max_rounds=None, max_jobs=300, max_age_days=None,
                     if stalls >= 2:
                         break
                 else:
-                    eval_value(js_scroll_wiggle(), tab_id=tid)
+                    _CI.scroll_wiggle(tid, "[data-testid=job-card]")
                     stalls += 1
                     if stalls >= 6:
                         break
@@ -452,11 +429,9 @@ def harvest(label="Toronto", max_rounds=None, max_jobs=300, max_age_days=None,
             "jobs": jobs,
         }
     finally:
-        post("/close", {"tabId": [search_tab["tabId"]],
-                        "expectHost": "simplify.jobs", "expectGroup": "Scratch"}, retries=0)
+        _CI.close([search_tab["tabId"]], expect_host="simplify.jobs")
         if opened_origin:
-            post("/close", {"tabId": [origin["tabId"]],
-                            "expectHost": "simplify.jobs", "expectGroup": "Scratch"}, retries=0)
+            _CI.close([origin["tabId"]], expect_host="simplify.jobs")
 
 
 if __name__ == "__main__":

@@ -43,5 +43,33 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(RC.validate(text), [])
 
 
+class ParseDepsTests(unittest.TestCase):
+    def test_parses_profiles(self):
+        deps = RC.parse_deps(VALID_CONFIG)
+        self.assertEqual(deps["profiles"]["no-llm-sweep"], ["0b", "0e"])
+
+    def test_parses_column0_requires_block(self):
+        cfg = VALID_CONFIG + """
+## Dependencies
+
+```yaml
+requires:
+  0b: [0a]
+  0e: [0a]
+  2b: [1, 0b]
+```
+"""
+        deps = RC.parse_deps(cfg)
+        self.assertEqual(deps["requires"]["0b"], ["0a"])
+        self.assertEqual(deps["requires"]["0e"], ["0a"])
+        self.assertEqual(deps["requires"]["2b"], ["1", "0b"])
+
+    def test_real_config_has_requires(self):
+        text = REAL_CONFIG.read_text(encoding="utf-8")
+        deps = RC.parse_deps(text)
+        self.assertIn("requires", deps)
+        self.assertEqual(deps["requires"]["1h"], ["1g"])
+
+
 if __name__ == "__main__":
     unittest.main()

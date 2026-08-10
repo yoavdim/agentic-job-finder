@@ -41,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import md_tables as M
-from reasons import classify_bucket
+from reasons import classify_bucket, split_leading_code
 
 # How each bucket is treated. skip=True means "don't re-suggest".
 BUCKET_SKIP = {
@@ -188,14 +188,26 @@ class DedupIndex:
             return
         ci_url = t.col("url") if t.has("url") else 1
         ci_status = t.col("status") if t.has("status") else 2
+        ci_comment = t.col("comment") if t.has("comment") else None
         for row in t.rows:
             cells = row.cells
             url = M.extract_url(cells[ci_url]) if len(cells) > ci_url else ""
             if not url:
                 continue
             status = (cells[ci_status] if len(cells) > ci_status else "").strip().lower()
-            bucket = "applied" if status == "applied" else "saved"
-            detail = f"in manual.md inbox ({status or 'saved'}): {url}"
+            if status == "rejected":
+                # A rejection carries its reason code in the Comment, so it is bucketed
+                # exactly like a `## Rejected` row — judgment -> blacklist, liveness ->
+                # re-suggestable, unclear -> reported. Bucketing it as `saved` (the old
+                # fallthrough) would block a liveness rejection from ever being re-found.
+                comment = (cells[ci_comment] if ci_comment is not None
+                           and len(cells) > ci_comment else "")
+                code, _verbatim = split_leading_code(comment)
+                bucket = classify_bucket(code)
+                detail = f"rejected in manual.md inbox ({code or 'unknown'}): {url}"
+            else:
+                bucket = "applied" if status == "applied" else "saved"
+                detail = f"in manual.md inbox ({status or 'saved'}): {url}"
             code = M.ats_code(url)
             if M.is_strong_code(code):
                 prev = self.by_code.get(code)

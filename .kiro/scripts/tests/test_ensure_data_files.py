@@ -43,8 +43,8 @@ class MissingSkeletonsTests(unittest.TestCase):
 
     def test_manual_skeleton_has_entries_table(self):
         self.assertIn("## Entries", E.MANUAL_SKELETON)
-        self.assertIn("| Added | URL | Status |", E.MANUAL_SKELETON)
-        self.assertIn("|---|---|---|", E.MANUAL_SKELETON)
+        self.assertIn("| Added | URL | Status | Comment |", E.MANUAL_SKELETON)
+        self.assertIn("|---|---|---|---|", E.MANUAL_SKELETON)
 
     def test_applied_skeleton_has_heading(self):
         self.assertIn("# Applied / In-Motion Tracker — Yoav Dim", E.APPLIED_SKELETON)
@@ -59,6 +59,8 @@ class MissingSkeletonsTests(unittest.TestCase):
         self.assertIn("| Saved | Company | Role | Raw | Location | Apply | Simplify | Status | Comment |", text)
         self.assertIn("## Rejected", text)
         self.assertIn("| Rejected | Company | Role | Raw | Location | Apply | Reason | Comment |", text)
+        self.assertIn("## Scraped-flushed (watchlist)", text)
+        self.assertIn("| Rejected | Company | Role | URL | Reason | Comment |", text)
 
     def test_existing_files_are_left_untouched(self):
         self.applied.write_text("# Applied\n\n- keep me\n", encoding="utf-8")
@@ -82,6 +84,17 @@ class MissingSkeletonsTests(unittest.TestCase):
         self.assertIn("## Companies", E.WATCHLIST_SKELETON)
         self.assertIn("| Added | Company | URL | CSS Selector | Referee |", E.WATCHLIST_SKELETON)
         self.assertIn("|---|---|---|---|---|", E.WATCHLIST_SKELETON)
+
+    def test_watchlist_skeleton_has_scraped_table_and_last_flush_stamp(self):
+        self.assertIn("## Scraped (watchlist)", E.WATCHLIST_SKELETON)
+        self.assertIn("**Last flush:** never", E.WATCHLIST_SKELETON)
+        self.assertIn("| Added | URL | Status |", E.WATCHLIST_SKELETON)
+        # the stamp must sit between the scraped heading and its table
+        lines = E.WATCHLIST_SKELETON.splitlines()
+        heading = lines.index("## Scraped (watchlist)")
+        stamp = lines.index("**Last flush:** never")
+        table = lines.index("| Added | URL | Status |")
+        self.assertTrue(heading < stamp < table)
 
     def test_watchlist_path_none_by_default_means_no_watchlist_in_the_plan(self):
         missing = E.missing_skeletons(self.thoughts, self.manual, self.applied,

@@ -193,21 +193,27 @@ def plan(shortlist_lines, applied_lines, today):
     return actions
 
 
-def plan_manual(manual_lines, applied_lines, actions=None):
+def plan_manual(manual_lines, applied_lines, actions=None, today=None):
     """Add `manual.md` inbox rows that can be resolved WITHOUT an LLM to the plan.
 
-    `manual.md` holds `| Added | URL | Status |` — a URL and nothing else. Turning a URL into
-    company/role/location is normally reading comprehension (stage 0c), but the subset whose
-    fields the URL *structure* already encodes can be filed mechanically, which is what lets
-    a fully-scripted sweep drain part of the inbox.
+    `manual.md` holds `| Added | URL | Status | Comment |` — a URL and a status. Turning a
+    URL into company/role/location is normally reading comprehension (stage 0c), but the
+    subset whose fields the URL *structure* already encodes can be filed mechanically, which
+    is what lets a fully-scripted sweep drain part of the inbox.
 
     Deliberately narrow:
     - `applied` + `url_identity` yields BOTH company and role -> insert into `## Applied`,
       drop the manual row.
-    - `applied` + anything missing -> LEFT IN PLACE and reported. A half-filled ledger row is
-      worse than an item still sitting in a box labelled "inbox", and nothing is lost: the
-      row stays visible in tracker.html and `dedup_index` now indexes it, so it can't be
-      re-suggested while it waits.
+    - `rejected` + `url_identity` yields BOTH company and role -> insert into `## Rejected`
+      (reason classified from the row's Comment via `classify_reason`, the tracker writes
+      `"<code> — note"`), drop the manual row. The rejection is stamped with `today`, the
+      drain date — the row's `Added` date is the scrape date, not when it was rejected. A
+      rejected row is not deduped against `## Applied`: the shortlist `[nope]` path never is
+      either, and there's no duplicate risk since Rejected and Applied are separate tables.
+    - `applied`/`rejected` + anything missing -> LEFT IN PLACE and reported. A half-filled
+      ledger row is worse than an item still sitting in a box labelled "inbox", and nothing
+      is lost: the row stays visible in tracker.html and `dedup_index` now indexes it, so it
+      can't be re-suggested while it waits.
     - `saved` -> ALWAYS left. Placing it in the shortlist needs a tier, a Notes
       classification and evidence, all of which are judgment.
 
@@ -232,6 +238,7 @@ def plan_manual(manual_lines, applied_lines, actions=None):
     _, by_key, by_code = index_applied(applied_lines)
     ci_url = t.col("url") if t.has("url") else 1
     ci_status = t.col("status") if t.has("status") else 2
+    ci_comment = t.col("comment") if t.has("comment") else None
 
     for row in t.rows:
         cells = row.cells
@@ -250,7 +257,7 @@ def plan_manual(manual_lines, applied_lines, actions=None):
         if not url:
             leave("no URL in the row")
             continue
-        if status != "applied":
+        if status not in ("applied", "rejected"):
             leave(f"status is {status or 'saved'!r}: placing it needs a tier + Notes "
                   f"classification, which is judgment (stage 0c)")
             continue
@@ -259,6 +266,24 @@ def plan_manual(manual_lines, applied_lines, actions=None):
         if not ident.complete:
             leave(f"URL structure yields no {' or '.join(ident.missing())} "
                   f"(stage 0c can read the page)")
+            continue
+
+        if status == "rejected":
+            comment = (cells[ci_comment] if ci_comment is not None
+                       and len(cells) > ci_comment else "")
+            reason, verbatim = classify_reason(comment)
+            actions["rejected_new"].append({
+                "date": today,                       # drain date, not the scrape date
+                "company": ident.company, "role": ident.role,
+                "raw": ident.raw_title or ident.role,
+                "location": "",                      # never encoded in a URL
+                "apply": f"[Apply]({url})",
+                "reason": reason,
+                "comment": verbatim,
+                "line_idx": row.line_idx,
+                "source": ident.source,
+            })
+            actions["manual_delete"].append(row.line_idx)
             continue
 
         code = M.ats_code(url)
@@ -386,7 +411,7 @@ def main():
 
     actions = plan(shortlist, applied, args.today)
     if manual is not None:
-        actions = plan_manual(manual, applied, actions)
+        actions = plan_manual(manual, applied, actions, today=args.today)
 
     if args.json:
         M.write_json(args.json, actions)
