@@ -106,12 +106,15 @@ serially:
 2. Extract each tab by its `tabId` (`extract(tab_id=…)` — see §1d) and read the postings
 ```python
 import sys; sys.path.insert(0, '.kiro/scripts/lib')
-import time, tab_share as TS
+import chrome_interface as CI
+ci = CI.ChromeInterface()
 urls = [row['url'] for row in parse_watchlist('watchlist.md')]   # or paste the table URLs
-tabs = [TS.open_tab(u, group_name='Scratch') for u in urls]      # phase 1: all opens, no wait
-time.sleep(3)
+tabs = [ci.open(u) for u in urls]                                # phase 1: all opens, no wait
+import time; time.sleep(3)
 for tid in tabs:                                                 # phase 2: extract each
-    print(TS.extract(tab_id=tid)['text'])
+    ci.scroll(tid)
+    ci.close_modals(tid)
+    print(ci.extract(tid)['text'])
 ```
 
 These are already vetted targets, so go deeper than generic web search: scan for in-scope
@@ -123,10 +126,12 @@ other search stages (§1g).
 ```bash
 python3 -c "
 import sys; sys.path.insert(0,'.kiro/scripts/lib')
-import tab_share as TS
-tid = TS.open_tab('https://builtintoronto.com/jobs/dev-engineering/entry-level', group_name='Scratch')
-import time; time.sleep(3)
-print(TS.extract(tab_id=tid)['text'])
+import chrome_interface as CI
+ci = CI.ChromeInterface()
+tid = ci.open_loaded('https://builtintoronto.com/jobs/dev-engineering/entry-level')
+ci.scroll(tid)
+ci.close_modals(tid)
+print(ci.extract(tid)['text'])
 "
 ```
 `/extract` with a bare `url` and no `tabId` reads whatever tab is currently **active**, not
@@ -193,17 +198,18 @@ echo '[{"company":"X","title":"Y","url":"..."}]' > /tmp/cand.json
 python3 .kiro/scripts/dedup_index.py --candidates /tmp/cand.json
 ```
 
-**Browser (Tab Share, port 8766):** prefer `.kiro/scripts/lib/tab_share.py` over raw curl —
-it gets the open→wait→extract-by-tabId sequence right (see §1d: `/extract` with a bare `url`
-silently reads the active tab instead, not the URL passed).
+**Browser (Tab Share, port 8766):** prefer `.kiro/scripts/lib/chrome_interface.py` over raw curl or tab_share —
+it gets the open→wait→extract-by-tabId sequence right, dismisses modals, and scrolls lazy lists.
 ```bash
 python3 -c "
 import sys; sys.path.insert(0,'.kiro/scripts/lib')
-import tab_share as TS
-tid = TS.open_tab('...', group_name='Scratch')
-import time; time.sleep(3)
-print(TS.extract(tab_id=tid))
-print(TS.tabs())
+import chrome_interface as CI
+ci = CI.ChromeInterface()
+tid = ci.open_loaded('...', wait=3)
+ci.scroll(tid)
+ci.close_modals(tid)
+print(ci.extract(tid))
+print(ci.tabs())
 "
 ```
 
