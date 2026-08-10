@@ -20,6 +20,8 @@
           padding:7px 12px;border-radius:7px;cursor:pointer;font-size:13px}
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:600}
+  button.danger{color:#ff9aa0;border-color:#c05058}
+  button.danger:hover{border-color:#e0585a}
   button:disabled{opacity:.45;cursor:default}
   .logo-btn{padding:4px;line-height:0;display:inline-flex;align-items:center;justify-content:center}
   .logo-btn img{width:20px;height:20px;border-radius:4px;display:block}
@@ -31,9 +33,11 @@
   .tabs button.active{background:var(--panel);border-color:var(--border);border-bottom-color:var(--panel)}
 
   main{padding:0 16px 60px}
+  .pagebar{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:10px}
   .badge{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);color:var(--muted);white-space:nowrap}
   .badge.ok{color:var(--good);border-color:var(--good)}
   .badge.warn{color:var(--warn);border-color:var(--warn)}
+  .badge.bad{color:#e0585a;border-color:#e0585a}
   #splitBanner{display:none;padding:10px 16px;background:rgba(224,164,88,.12);border-bottom:1px solid var(--warn);
                color:var(--text);font-size:13px;align-items:center;gap:12px}
   #splitBanner.show{display:flex}
@@ -104,6 +108,21 @@
   .rj-reason:hover{opacity:1}
   .rj-reason.sel{opacity:1;font-weight:600;box-shadow:0 0 0 2px rgba(255,255,255,.15) inset}
   .rj-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+
+  /* flush-all dialog — same backdrop/box as the reject dialog */
+  #flushModal{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+              background:rgba(0,0,0,.55)}
+  #flushModal.show{display:flex}
+  .flush-box{width:min(620px,92vw)}
+  .flush-list{border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px}
+  .flush-list summary{cursor:pointer;padding:7px 11px;color:var(--text);font-weight:600;user-select:none}
+  .flush-list summary:hover{color:var(--accent)}
+  .flush-body{max-height:42vh;overflow-y:auto;padding:4px 12px 8px;line-height:1.55;border-top:1px solid var(--border)}
+  .flush-body ul{margin:0;padding:0;list-style:none}
+  .flush-body li{padding:2px 0}
+  .flush-body li + li{border-top:1px solid var(--border)}
+  .flush-co{color:var(--muted);white-space:nowrap}
+  .flush-note{color:var(--warn);font-size:12px;margin:10px 0 0}
 </style>
 </head>
 <body>
@@ -124,6 +143,8 @@
   <button id="forget" style="display:none" title="Clear remembered files">Forget</button>
   <label id="showRejWrap" style="display:none;font-size:12px;color:var(--muted);cursor:pointer">
     <input type="checkbox" id="showRejected"> show rejected</label>
+  <label id="showAppliedWrap" style="display:none;font-size:12px;color:var(--muted);cursor:pointer">
+    <input type="checkbox" id="showApplied" checked> show applied</label>
   <span id="modeBadge" class="badge" title="Split-pane status">…</span>
   <span id="status" class="status">No files loaded.</span>
 </header>
@@ -149,6 +170,22 @@
     <div class="rj-actions">
       <button id="rjCancel">Cancel</button>
       <button id="rjConfirm" class="primary">Reject</button>
+    </div>
+  </div>
+</div>
+
+<div id="flushModal">
+  <div class="rj-box flush-box">
+    <h3>Flush all scraped rows</h3>
+    <p class="rj-sub" id="flushSummary"></p>
+    <details class="flush-list" id="flushDetails">
+      <summary id="flushToggle"></summary>
+      <div class="flush-body" id="flushList"></div>
+    </details>
+    <p class="flush-note" id="flushCleanNote" style="display:none"></p>
+    <div class="rj-actions">
+      <button id="flushCancel">Cancel</button>
+      <button id="flushConfirm" class="danger">Flush all</button>
     </div>
   </div>
 </div>
@@ -192,6 +229,7 @@ const mainEl = $("#main");
 
 let currentUrl = null;
 let showRejected = false; // when false, [nope] rows are hidden (but kept in the file)
+let showApplied = true;   // when false, [x] / status=applied rows are hidden (kept in the file)
 
 // Rejection reason taxonomy (matches search-playbook.md §7). label shown, code stored, color.
 const REJECT_REASONS = [
@@ -270,9 +308,11 @@ function makeHint(html, color){
 
 // The small "✕ remove this row" button used by thoughts/manual (delete the line outright,
 // as opposed to the shortlist's reject flow which keeps the row and marks it [nope]).
-function makeDeleteButton(title, onClick, className){
+// `glyph` lets callers swap the ✕ for ↩ (e.g. an already-rejected manual row, where the
+// button un-rejects instead of rejecting).
+function makeDeleteButton(title, onClick, className, glyph){
   const btn = document.createElement("button");
-  btn.className = className || "rejbtn"; btn.textContent = "✕"; btn.title = title;
+  btn.className = className || "rejbtn"; btn.textContent = glyph || "✕"; btn.title = title;
   btn.addEventListener("click", onClick);
   return btn;
 }
@@ -465,6 +505,13 @@ function render(){
   mainEl.innerHTML = "";
   const f = files.get(activeName);
   if (!f){ mainEl.innerHTML = '<div class="empty">No file selected.</div>'; return; }
+  // page-level toolbar: the shortlist's "reject all" lives here, not in the header
+  if (activeName === "shortlist.md"){
+    const bar = document.createElement("div");
+    bar.className = "pagebar";
+    bar.innerHTML = '<button id="rejectAllOpen" class="danger" title="Mark every still-open shortlist row [nope] with one reason + comment (same picker as a single reject). Then Save changes and run migrate_resolved.py.">Reject all open</button>';
+    mainEl.appendChild(bar);
+  }
   if (activeName === "thoughts.md"){ renderThoughts(f); return; }
   if (activeName === "manual.md"){ renderManual(f); return; }
   if (!f.tables.length){ mainEl.innerHTML = '<div class="empty">No tables found in this file.</div>'; return; }
@@ -484,6 +531,8 @@ function render(){
       tbl.rows.forEach(row => {
         const rejected = tbl.chkCol != null && isRejected(row.cells[tbl.chkCol]);
         if (rejected && !showRejected) return; // hidden but stays in the file
+        const applied = tbl.chkCol != null && isApplied(row.cells[tbl.chkCol]);
+        if (applied && !showApplied) return;   // hidden but stays in the file
         const tr = document.createElement("tr");
         if (rejected) tr.classList.add("rejected");
         const url = firstUrl(row.cells);
@@ -553,6 +602,9 @@ function render(){
 
 // A status cell is "rejected" when it holds [nope] (case-insensitive).
 function isRejected(cell){ return /\[\s*nope\s*\]/i.test(cell || ""); }
+
+// A status cell is "applied" when it holds [x] (case-insensitive).
+function isApplied(cell){ return /\[\s*x\s*\]/i.test(cell || ""); }
 
 // ---------- thoughts.md editor (bullet list, not a table) ----------
 const BULLET_RE = /^(\s*)[-*]\s+(.*)$/;
@@ -672,6 +724,7 @@ function parseManualEntries(lines){
       added: r.cells[0] || "",
       url, title,
       status: r.cells[2] || "",
+      comment: r.cells[3] || "",
     };
   });
 }
@@ -721,16 +774,17 @@ async function fetchPageTitle(url){
   return resolveTitle(url, title);
 }
 
-function addManualEntry(f, url, status, title){
+function addManualEntry(f, url, status, title, opts){
   const clean = url.replace(/\r?\n/g," ").trim();
   if (!clean) return;
-  const today = new Date().toISOString().slice(0,10);
+  opts = opts || {};
+  const today = opts.date || new Date().toISOString().slice(0,10);
   const safeTitle = title ? title.replace(/\[/g,"(").replace(/\]/g,")").replace(/\|/g,"-") : null;
   const escUrl = clean.replace(/\|/g,"%7C");
   const urlCell = safeTitle
     ? `[${safeTitle}](<${escUrl}>)`
     : escUrl;
-  const newLine = `| ${today} | ${urlCell} | ${status} |`;
+  const newLine = `| ${today} | ${urlCell} | ${status} | ${escCell(opts.comment || "")} |`;
   // Find the entries table: insert after the separator row
   const tables = parseTables(f.lines);
   if (tables.length){
@@ -1107,14 +1161,30 @@ function renderManual(f){
   if (!entries.length){
     mainEl.appendChild(makeEmptyNote("No manual entries yet. Add a URL above."));
     renderSavedMirror();
+    renderScrapedList(colorMap, hostmap);
     return;
   }
-
-  const table = makeTable(
-    [{text:"Added"},{text:"URL"},{text:"Status"},{text:"",width:"40px"}],
-    tbody => {
-      entries.forEach(entry => {
+  // "show applied" / "show rejected" (both checked by default) gate the manual list:
+  // unchecking "show applied" hides `applied` rows, unchecking "show rejected" hides
+  // `rejected` rows, so only still-pending `saved` entries remain visible by default.
+  const visible = entries.filter(e => {
+    const st = (e.status || "").trim().toLowerCase();
+    if (st === "applied" && !showApplied) return false;
+    if (st === "rejected" && !showRejected) return false;
+    return true;
+  });
+  if (!visible.length){
+    mainEl.appendChild(makeEmptyNote("No manual entries match the current filters (uncheck " +
+                                     "“show applied” hides applied rows, “show rejected” hides rejected)."));
+  } else {
+    const headers = [{text:"Added"},{text:"URL"},{text:"Status"},{text:"",width:"40px"}];
+    if (showRejected) headers.splice(3, 0, {text:"Comment"});
+    const table = makeTable(headers, tbody => {
+      visible.forEach(entry => {
+        const st = (entry.status || "").trim().toLowerCase();
+        const rejected = st === "rejected";
         const tr = document.createElement("tr");
+        if (rejected) tr.classList.add("rejected");
         makeRowClickable(tr, entry.url);
         tr.appendChild(makeTextCell(entry.added));
 
@@ -1130,36 +1200,458 @@ function renderManual(f){
         }
         tr.appendChild(urlCell);
 
-        // Status (editable — toggle between saved/applied)
-        const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok" : ""); };
+        // Status (editable — saved/applied/rejected). Rejecting opens the reason picker;
+        // a reason chip is required, same as on the shortlist and the Saved mirror.
+        const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok"
+                                                     : s.value === "rejected" ? " bad" : ""); };
         const sel = makeStatusSelect(
-          [["saved", "saved"], ["applied", "applied"]], entry.status, paint);
-        sel.addEventListener("change", ev => {
-          ev.stopPropagation();
-          paint(sel);
+          [["saved", "saved"], ["applied", "applied"], ["rejected", "rejected"]],
+          (st === "applied" || st === "rejected") ? st : "saved", paint);
+        let lastCommitted = sel.value; // last value actually written, for cancel-revert
+        const writeStatus = (value, comment) => {
           const newCells = [...entry.cells];
-          newCells[2] = sel.value;
+          while (newCells.length < 4) newCells.push("");
+          newCells[2] = value;
+          if (comment !== undefined) newCells[3] = comment;
           f.lines[entry.lineIdx] = rebuildLine(newCells);
+          entry.cells = newCells; entry.status = value;
+          if (comment !== undefined) entry.comment = comment;
           f.dirty = true;
           updateDirtyUI();
+        };
+        sel.addEventListener("change", ev => {
+          ev.stopPropagation();
+          if (sel.value === "rejected"){
+            openRejectModal({
+              title: "Reject: " + (entry.title || entry.url),
+              initialComment: entry.comment,
+              onConfirm: (_code, merged) => {
+                writeStatus("rejected", merged);
+                render();
+              },
+              onCancel: () => { sel.value = lastCommitted; paint(sel); },
+            });
+          } else {
+            paint(sel);
+            writeStatus(sel.value);
+            lastCommitted = sel.value;
+          }
         });
         tr.appendChild(makeStatusCell(sel));
 
-        // Delete button
-        tr.appendChild(makeDeleteCell(makeDeleteButton("Remove entry", () => {
-          f.lines.splice(entry.lineIdx, 1);
-          f.dirty = true; updateDirtyUI();
-          f.tables = parseTables(f.lines);
-          render();
-        })));
+        // Comment (the rejection reason) — read-only here: it's set through the reject
+        // dialog, which enforces picking a chip, not free-typed. Hidden unless "show
+        // rejected" is on, matching how rejected rows everywhere are kept-but-hidden.
+        if (showRejected){
+          tr.appendChild(makeTextCell(entry.comment));
+        }
+
+        // Reject / un-reject button. ✕ opens the reason picker (a reason is required);
+        // once rejected it becomes ↩ and restores the row to `saved` (comment kept).
+        tr.appendChild(makeDeleteCell(makeDeleteButton(
+          rejected ? "Un-reject (restore to saved)" : "Reject (asks for a reason)",
+          () => {
+            if (rejected){
+              writeStatus("saved");
+              render();
+            } else {
+              openRejectModal({
+                title: "Reject: " + (entry.title || entry.url),
+                initialComment: entry.comment,
+                onConfirm: (_code, merged) => {
+                  writeStatus("rejected", merged);
+                  render();
+                },
+                onCancel: () => { sel.value = lastCommitted; paint(sel); },
+              });
+            }
+          },
+          "rejbtn",
+          rejected ? "↩" : "✕")));
+
+        tbody.appendChild(tr);
+      });
+    });
+    mainEl.appendChild(table);
+  }
+
+  renderSavedMirror();
+  renderScrapedList(colorMap, hostmap);
+}
+
+// ---------- scraped watchlist (watchlist.md `## Scraped (watchlist)`) ----------
+// The rows are `| Added | [Title](<url>) | Status |` — the same shape as manual.md's
+// Entries table. Status is empty until the row is filed: every action below MOVES the row
+// into manual.md (saved / applied / rejected), so the scraped table only ever holds
+// unhandled postings and the flush sweep's "empty status -> too-old" rule stays true.
+
+function parseScrapedEntries(lines){
+  const tables = parseTables(lines);
+  const tbl = tables.find(t => /scraped/i.test(t.sectionTitle || ""));
+  if (!tbl) return [];
+  return tbl.rows.map(r => {
+    const { url, title } = parseUrlCell(r.cells[1] || "");
+    return {
+      lineIdx: r.lineIdx,
+      cells: r.cells,
+      added: r.cells[0] || "",
+      url, title,
+      status: r.cells[2] || "",
+    };
+  });
+}
+
+// File a scraped row: remove it from watchlist.md and append it to manual.md's `## Entries`
+// with the given status (and comment for a rejection). The row keeps its original Added
+// date, and the title travels with it, so the manual row is already titled.
+function moveScrapedToManual(wf, f, entry, status, comment){
+  wf.lines.splice(entry.lineIdx, 1);
+  wf.dirty = true;
+  wf.tables = parseTables(wf.lines);
+  addManualEntry(f, entry.url, status, entry.title, { date: entry.added, comment: comment || "" });
+}
+
+function renderScrapedList(colorMap, hostmap){
+  const wf = files.get("watchlist.md");
+
+  mainEl.appendChild(makeSectionHeading("Scraped (watchlist)"));
+  mainEl.appendChild(makeHint("New postings scraped from the watched companies, mirrored from <code>watchlist.md</code>. <b>Save to manual</b> files the role in <code>manual.md</code> as <b>saved</b>; <b>Applied</b> files it as <b>applied</b>; <b>Reject</b> asks for a reason and files it as <b>rejected</b>. Anything left unmarked can be <b>Flush all</b>ed into applied.md as too-old (after a confirmation)."));
+
+  if (!wf){
+    mainEl.appendChild(makeEmptyNote("watchlist.md is not open — open the job-search folder to see the scraped list."));
+    return;
+  }
+  const rows = parseScrapedEntries(wf.lines).filter(e => !(e.status || "").trim());
+  if (!rows.length){
+    mainEl.appendChild(makeEmptyNote("No scraped postings left to file."));
+    return;
+  }
+
+  // The flush in one click — mirrors watchlist_flush.py --apply: move every UNMARKED row
+  // to applied.md's `## Scraped-flushed (watchlist)` as too-old (the permanent dedup
+  // record), then drop them from this inbox. Rows already tracked elsewhere are cleaned
+  // up without a duplicate flush.
+  const flushBtn = document.createElement("button");
+  flushBtn.className = "danger";
+  flushBtn.style.cssText = "margin:4px 0 12px";
+  flushBtn.textContent = "Flush all";
+  flushBtn.title = "Move every unmarked scraped row to applied.md's "
+    + "'## Scraped-flushed (watchlist)' as too-old";
+  flushBtn.addEventListener("click", () => flushAllScraped()
+    .catch(e => setStatus("Flush failed: " + e.message)));
+  mainEl.appendChild(flushBtn);
+
+  const f = files.get("manual.md");
+  const table = makeTable(
+    [{text:"Added"},{text:"URL"},{text:"Status"},{text:"Actions"}],
+    tbody => {
+      rows.forEach(entry => {
+        const tr = document.createElement("tr");
+        makeRowClickable(tr, entry.url);
+        tr.appendChild(makeTextCell(entry.added));
+
+        // URL (clickable) — tinted with the company color, same as the manual list.
+        const urlCell = document.createElement("td");
+        const company = companyNameForUrl(entry.url, hostmap);
+        if (entry.url){
+          const link = makeLinkCell(entry.url, entry.title);
+          link.style.color = companyColor(company, colorMap);
+          link.title = company + " — " + entry.url;
+          urlCell.appendChild(link);
+        }
+        tr.appendChild(urlCell);
+
+        tr.appendChild(makeTextCell(""));
+
+        const act = document.createElement("td");
+        act.style.cssText = "white-space:nowrap";
+        const mk = (label, title, fn) => {
+          const b = document.createElement("button");
+          b.className = "rejbtn"; b.textContent = label; b.title = title;
+          b.style.cssText = "margin-right:4px";
+          b.addEventListener("click", e => { e.stopPropagation(); fn(); });
+          act.appendChild(b);
+        };
+        mk("Save", "File in manual.md as saved", () => {
+          if (!f){ alert("manual.md is not open — open the job-search folder."); return; }
+          moveScrapedToManual(wf, f, entry, "saved", "");
+        });
+        mk("Applied", "File in manual.md as applied", () => {
+          if (!f){ alert("manual.md is not open — open the job-search folder."); return; }
+          moveScrapedToManual(wf, f, entry, "applied", "");
+        });
+        mk("✕", "Reject — asks for a reason", () => {
+          if (!f){ alert("manual.md is not open — open the job-search folder."); return; }
+          openRejectModal({
+            title: "Reject: " + (entry.title || entry.url),
+            onConfirm: (_code, merged) => moveScrapedToManual(wf, f, entry, "rejected", merged),
+          });
+        });
+        tr.appendChild(act);
 
         tbody.appendChild(tr);
       });
     });
   mainEl.appendChild(table);
-
-  renderSavedMirror();
 }
+
+// ---------- flush all scraped rows (watchlist_flush.py --apply) ----------
+// Browser twin of the Python flush: move every UNMARKED `## Scraped (watchlist)` row into
+// applied.md's `## Scraped-flushed (watchlist)` table as `too-old` — the permanent dedup
+// record — and drop the rows from watchlist.md. Rows whose URL's ATS code is already
+// tracked anywhere (applied.md tables + manual.md) are cleaned up without being re-flushed,
+// so the operation is idempotent just like the script.
+const FLUSH_HEADER = ["Rejected", "Company", "Role", "URL", "Reason", "Comment"];
+
+// Set (or create) the `## Scraped (watchlist)` **Last flush:** stamp in watchlist.md —
+// the JS twin of watchlist_flush.set_last_flush. Only fires when the section exists.
+function setLastFlush(lines, date){
+  const out = lines.slice();
+  const heading = out.findIndex(l => /^## scraped \(watchlist\)\s*$/i.test(l));
+  if (heading < 0) return out;
+  for (let i = heading + 1; i < out.length; i++){
+    if (/^\s*#{1,6}\s/.test(out[i])) break;
+    if (/^\*\*Last flush:\*\*\s*/.test(out[i])){
+      out[i] = "**Last flush:** " + date;
+      return out;
+    }
+  }
+  let j = heading + 1;
+  if (j < out.length && out[j].trim() === "") j++;
+  if (j === heading + 1) out.splice(j, 0, "", "**Last flush:** " + date, "");
+  else out.splice(j, 0, "**Last flush:** " + date, "");
+  return out;
+}
+
+// Pull a URL out of a markdown cell ('[Apply](url)', '[Title](<url>)', or a bare URL) —
+// the JS counterpart of md_tables.extract_url.
+function extractUrlCell(cell){
+  if (cell == null) return "";
+  const s = String(cell).trim();
+  const m = s.match(/\[[^\]]*\]\(\s*<?(https?:\/\/[^)>\s]+)>?\s*\)/);
+  const raw = m ? m[1] : ((s.match(/<?(https?:\/\/[^\s)>]+)>?/) || [])[1]);
+  if (!raw) return "";
+  return raw.replace(/^</, "").replace(/>$/, "")
+            .split(/[?#]/, 1)[0].replace(/\/+$/, "");
+}
+
+// Stable, org-namespaced ATS code for dedup — the JS counterpart of md_tables.ats_code.
+// Codes are namespaced so a bare per-ATS id can't collide across orgs; a URL that matches
+// no pattern falls back to the cleaned URL (not proof of identity, same caveat as Python).
+const ATS_CODE_PATTERNS = [
+  ["applytojob", /([A-Za-z0-9]+)\.applytojob\.com\/apply\/(?:confirm\/)?([A-Za-z0-9]+)/i],
+  ["applytojob", /applytojob\.com\/apply\/(?:confirm\/)?([A-Za-z0-9]+)/i],
+  ["greenhouse", /greenhouse\.io\/([^/]+)\/jobs\/(\d+)/i],
+  ["greenhouse", /[?&]gh_jid=(\d+)/i],
+  ["ashby",      /ashbyhq\.com\/([^/]+)\/([0-9a-f-]{16,})/i],
+  ["recruitee",  /([A-Za-z0-9-]+)\.recruitee\.com\/o\/([a-z0-9-]+)/i],
+  ["recruitee",  /recruitee\.com\/o\/([a-z0-9-]+)/i],
+  ["lever",      /lever\.co\/([^/]+)\/([0-9a-f-]{16,})/i],
+  ["linkedin",   /linkedin\.com\/jobs\/view\/(\d+)/i],
+  ["builtin",    /builtin(?:[a-z]*)\.com\/job\/[a-z0-9-]+\/(\d+)/i],
+  ["workday",    /([a-z0-9-]+)\.(?:wd\d+\.)?myworkdayjobs\.com.*?\b(JR-?\d+)/i],
+  ["workday",    /([a-z0-9-]+)\.(?:wd\d+\.)?myworkdayjobs\.com.*?[?&](?:q|jobId)=([\w-]+)/i],
+  ["workday",    /myworkdayjobs\.com\/.*\/([\w-]+\/[\w-]+)$/i],
+];
+function atsCode(url){
+  const raw = extractUrlCell(url);
+  if (!raw) return "";
+  const bare = raw.split(/[?#]/, 1)[0];
+  for (const [name, re] of ATS_CODE_PATTERNS){
+    const m = raw.match(re) || bare.match(re);
+    if (m){
+      const parts = m.slice(1).filter(Boolean).map(p => String(p).toLowerCase());
+      return [name].concat(parts).join(":");
+    }
+  }
+  return bare.replace(/\/+$/, "");
+}
+
+// [{"company","url"}] from watchlist.md's `## Companies` table.
+function readCompanies(lines){
+  const tables = parseTables(lines);
+  const tbl = tables.find(t => /^companies$/i.test((t.sectionTitle || "").trim()));
+  if (!tbl) return [];
+  const ciCo = tbl.headers.findIndex(h => h.toLowerCase() === "company");
+  const ciUrl = tbl.headers.findIndex(h => h.toLowerCase() === "url");
+  if (ciCo < 0 || ciUrl < 0) return [];
+  const out = [];
+  for (const r of tbl.rows){
+    const co = (r.cells[ciCo] || "").trim();
+    const url = extractUrlCell(r.cells[ciUrl] || "");
+    if (co && url) out.push({ company: co, url });
+  }
+  return out;
+}
+
+function hostOf(url){
+  const m = /^https?:\/\/([^/:]+)/.exec(url || "");
+  return m ? m[1].toLowerCase() : "";
+}
+
+// Best `## Companies` company name for a listing URL, by shared host — the JS counterpart
+// of watchlist_flush.company_for. Prefers the longest shared host (multiple companies on
+// one careers host, e.g. several lever accounts).
+function companyForUrl(url, companies){
+  const urlHost = hostOf(url);
+  if (!urlHost) return "";
+  let best = "", bestHost = "";
+  for (const c of companies){
+    const chost = hostOf(c.url);
+    if (!chost) continue;
+    if (urlHost !== chost && !urlHost.endsWith("." + chost)) continue;
+    if (chost.length > bestHost.length){ best = c.company; bestHost = chost; }
+  }
+  return best;
+}
+
+async function flushAllScraped(){
+  const wf = files.get("watchlist.md");
+  const applied = files.get("applied.md");
+  const manual = files.get("manual.md");
+  if (!wf || !applied){
+    alert("watchlist.md and applied.md must both be open to flush.");
+    return;
+  }
+  const scraped = parseScrapedEntries(wf.lines).filter(e => !(e.status || "").trim());
+  if (!scraped.length){
+    alert("Nothing to flush — every scraped row has been filed.");
+    return;
+  }
+
+  // Dedup keys already tracked anywhere (applied.md tables + manual.md tables), so a flush
+  // is idempotent: rows already recorded get cleaned up, never re-flushed.
+  const tracked = new Set();
+  for (const rec of [applied, manual]){
+    if (!rec) continue;
+    for (const t of rec.tables){
+      for (const row of t.rows){
+        for (const cell of row.cells){
+          const code = atsCode(cell);
+          if (code) tracked.add(code);
+        }
+      }
+    }
+  }
+
+  const companies = readCompanies(wf.lines);
+  const today = new Date().toISOString().slice(0, 10);
+  const flushed = [];
+  const toDelete = [];
+  for (const e of scraped){
+    if (!e.url) continue;
+    const code = atsCode(e.url);
+    if (code && tracked.has(code)){
+      toDelete.push(e.lineIdx);            // already recorded somewhere — just clean up
+      continue;
+    }
+    if (code) tracked.add(code);
+    toDelete.push(e.lineIdx);
+    flushed.push({
+      rejected: today,
+      company: companyForUrl(e.url, companies),
+      role: e.title || "",
+      url: e.url,
+      reason: "too-old",
+      comment: "watchlist scrape " + e.added + ", unmarked at flush (auto)",
+    });
+  }
+  if (!flushed.length && !toDelete.length){
+    alert("Nothing to flush.");
+    return;
+  }
+
+  if (!await confirmFlush(flushed, toDelete.length - flushed.length)) return;
+
+  if (flushed.length){
+    // Ensure the flushed table exists, then insert the rows at the top of its data block
+    // (newest-first, like the script). Build rows as `| Rejected | Company | Role | URL |
+    // Reason | Comment |`.
+    const rows = flushed.map(f => {
+      const urlCell = "[" + escCell(f.role || f.url) + "](<" + f.url.replace(/\|/g, "%7C") + ">)";
+      return "| " + escCell(f.rejected) + " | " + escCell(f.company) + " | " + escCell(f.role)
+        + " | " + urlCell + " | " + escCell(f.reason) + " | " + escCell(f.comment) + " |";
+    });
+    let ft = (applied.tables || []).find(t => /scraped-flushed/i.test(t.sectionTitle || ""));
+    if (!ft){
+      while (applied.lines.length && applied.lines[applied.lines.length - 1] === "") applied.lines.pop();
+      applied.lines.push("", "## Scraped-flushed (watchlist)", "",
+        "| " + FLUSH_HEADER.join(" | ") + " |",
+        "| " + FLUSH_HEADER.map(() => "---").join(" | ") + " |");
+      applied.tables = parseTables(applied.lines);
+      ft = (applied.tables || []).find(t => /scraped-flushed/i.test(t.sectionTitle || ""));
+    }
+    applied.lines.splice(ft.headerIdx + 2, 0, ...rows);
+    applied.dirty = true;
+  }
+
+  const delSet = new Set(toDelete);
+  wf.lines = wf.lines.filter((_line, i) => !delSet.has(i));
+  if (flushed.length){
+    wf.lines = setLastFlush(wf.lines, today);
+  }
+  wf.dirty = true;
+  wf.tables = parseTables(wf.lines);
+  applied.tables = parseTables(applied.lines);
+  updateDirtyUI();
+  await saveAll();
+  render();
+}
+
+// Flush-all confirm dialog — same centered, backdrop-darkened modal as the reject picker.
+// Resolves true only when the user actually confirms; Cancel / Escape / backdrop close resolve false.
+let flushCtx = null; // { resolve(bool) }
+function confirmFlush(flushed, cleaned){
+  return new Promise(resolve => {
+    $("#flushSummary").innerHTML = "Move <b>" + flushed.length + "</b> unmarked scraped row(s) into "
+      + "applied.md's <code>## Scraped-flushed (watchlist)</code> as <code>too-old</code>?";
+    const list = $("#flushList");
+    list.innerHTML = "";
+    const toggle = $("#flushToggle");
+    if (flushed.length){
+      const ul = document.createElement("ul");
+      flushed.forEach(f => {
+        const li = document.createElement("li");
+        li.innerHTML = "<span class='flush-co'>" + escCell(f.company || "?")
+          + "</span> &mdash; " + escCell(f.role || f.url);
+        ul.appendChild(li);
+      });
+      list.appendChild(ul);
+      toggle.textContent = flushed.length + " row(s) — click to show/hide";
+    } else {
+      list.innerHTML = "<span class='flush-co'>No rows to move — only cleanup of "
+        + "rows already tracked elsewhere.</span>";
+      toggle.textContent = "No rows to move — only cleanup";
+    }
+    const note = $("#flushCleanNote");
+    if (cleaned > 0){
+      note.style.display = "";
+      note.textContent = "Also removes " + cleaned
+        + " row(s) already tracked elsewhere (no re-flush).";
+    } else {
+      note.style.display = "none";
+    }
+    $("#flushDetails").removeAttribute("open"); // collapsed by default
+    flushCtx = { resolve };
+    $("#flushModal").classList.add("show");
+  });
+}
+
+function closeFlushModal(){
+  const ctx = flushCtx;
+  flushCtx = null;
+  $("#flushModal").classList.remove("show");
+  if (ctx) ctx.resolve(false);
+}
+
+$("#flushCancel").addEventListener("click", closeFlushModal);
+$("#flushConfirm").addEventListener("click", ()=>{
+  const ctx = flushCtx;
+  flushCtx = null;
+  $("#flushModal").classList.remove("show");
+  if (ctx) ctx.resolve(true);
+});
+$("#flushModal").addEventListener("click", e=>{ if(e.target.id==="flushModal") closeFlushModal(); });
 
 // ---------- Simplify Saved (from applied.md) — the single copy of that list ----------
 // The Status cell is TRANSIENT intent, not stored state: the next `saved_sync` run reads
@@ -1207,6 +1699,10 @@ function renderSavedMirror(){
 
   const table = makeTable(headers, tbody => {
     tbl.rows.forEach(row => {
+      // "show applied" (checked by default) also gates this list: unchecking it hides rows
+      // you've marked applied so only still-saved intent remains visible.
+      const rowStatus = (ciStatus >= 0 ? (row.cells[ciStatus] || "") : "").trim().toLowerCase();
+      if (rowStatus === "applied" && !showApplied) return; // hidden but stays in the file
       const tr = document.createElement("tr");
       const { url } = parseUrlCell(ciApply >= 0 ? (row.cells[ciApply] || "") : "");
       makeRowClickable(tr, url);
@@ -1233,7 +1729,7 @@ function renderSavedMirror(){
       tr.appendChild(roleCell);
 
       // Status — the editable intent cell
-      const cur = (ciStatus >= 0 ? (row.cells[ciStatus] || "") : "").trim().toLowerCase();
+      const cur = rowStatus;
       const initial = (cur === "applied" || cur === "rejected") ? cur : "";
       const paint = s => { s.className = "badge" + (s.value === "applied" ? " ok"
                                                     : s.value === "rejected" ? " bad" : ""); };
@@ -1361,6 +1857,11 @@ $("#rjCancel").addEventListener("click", closeRejectModal);
 $("#rjConfirm").addEventListener("click", confirmReject);
 $("#rejectModal").addEventListener("click", e=>{ if(e.target.id==="rejectModal") closeRejectModal(); });
 document.addEventListener("keydown", e=>{
+  if ($("#flushModal").classList.contains("show")){
+    if (e.key==="Escape") closeFlushModal();
+    if (e.key==="Enter" && (e.ctrlKey||e.metaKey)) $("#flushConfirm").click();
+    return;
+  }
   if (!$("#rejectModal").classList.contains("show")) return;
   if (e.key==="Escape") closeRejectModal();
   if (e.key==="Enter" && (e.ctrlKey||e.metaKey)) confirmReject();
@@ -1680,6 +2181,7 @@ function afterLoad(){
   saveActiveName();
   $("#reload").disabled = files.size===0;
   $("#showRejWrap").style.display = files.size ? "" : "none";
+  $("#showAppliedWrap").style.display = files.size ? "" : "none";
   buildTabs(); render();
   setStatus(`${files.size} file(s) loaded.`);
 }
@@ -1713,6 +2215,53 @@ $("#reload").addEventListener("click", ()=>{
 });
 
 $("#showRejected").addEventListener("change", e=>{ showRejected = e.target.checked; render(); });
+$("#showApplied").addEventListener("change", e=>{ showApplied = e.target.checked; render(); });
+
+// Reject every still-open shortlist row with ONE reason + comment, using the same
+// reject dialog as a single row (a reason chip is required, free text optional). Only
+// `[ ]` rows are touched; `[x]` / `[nope]` / no-box rows are left alone. Rows stay in
+// the file until Save changes, and the move to `## Rejected` is migrate_resolved.py.
+// Delegated on document: the button is built per-render inside the page toolbar.
+// Rows that already carry a comment keep it — the new reason is put first and the
+// existing note appended after it (same "never clobber" policy as migrate_resolved's
+// merge_comment, but with the new reason leading).
+function appendComment(existing, incoming){
+  const e = (existing || "").trim(), i = (incoming || "").trim();
+  if (!e) return i;
+  if (!i) return e;
+  if (e.toLowerCase().includes(i.toLowerCase())) return e;
+  if (i.toLowerCase().includes(e.toLowerCase())) return i;
+  return i + "; " + e;
+}
+document.addEventListener("click", ev=>{
+  if (!ev.target || ev.target.id !== "rejectAllOpen") return;
+  const f = files.get("shortlist.md");
+  if (!f) return;
+  const open = [];
+  f.tables.forEach(tbl=>{
+    if (tbl.chkCol == null) return;
+    tbl.rows.forEach(row=>{
+      const st = row.cells[tbl.chkCol] || "";
+      if (isApplied(st) || isRejected(st) || !/\[/.test(st)) return;
+      open.push({tbl, row});
+    });
+  });
+  if (!open.length){ setStatus("Nothing to reject — no open rows left."); return; }
+  openRejectModal({
+    title: "Reject all open (" + open.length + ")",
+    initialComment: "",
+    onConfirm: (_code, merged)=>{
+      for (const {tbl, row} of open){
+        row.cells[tbl.chkCol] = "[nope]";
+        if (tbl.commentCol != null) row.cells[tbl.commentCol] =
+          appendComment(row.cells[tbl.commentCol] || "", merged);
+        commitRow(f, row, tbl);
+      }
+      render();
+      setStatus("Rejected " + open.length + " open row(s) — click Save changes to write.", "dirty");
+    },
+  });
+});
 $("#reconnect").addEventListener("click", ()=>reconnectPending().catch(e=>setStatus("Reconnect failed: "+e.message)));
 $("#forget").addEventListener("click", async ()=>{
   await idbDel(IDB_KEY);
