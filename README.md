@@ -10,7 +10,18 @@ and a desktop launcher for kicking off routines.
 
 > Sample data (fictional job seeker) shown above.
 
-![The routine launcher — pick a workflow and the agent runs it](<./Routines.png>)
+![The routine launcher — pick a workflow and the agent runs it](./Routines.png)
+
+## Table of Contents
+
+- [Three ways to use it](#three-ways-to-use-it)
+- [The browser app (`tracker.html`)](#the-browser-app-trackerhtml)
+- [The routine launcher](#the-routine-launcher)
+- [Extras you&#39;ll want](#extras-youll-want)
+- [Setup](#setup)
+- [The magic behind the scenes](#the-magic-behind-the-scenes)
+- [What&#39;s in here](#whats-in-here)
+- [License](#license)
 
 ## Three ways to use it
 
@@ -50,7 +61,7 @@ All three paths feed the same `shortlist.md` / `applied.md` tables and the same
 ## The browser app (`tracker.html`)
 
 Open it in a **Chromium browser** (Chrome/Edge/Brave) — it reads and writes your `.md`
-files directly.
+files directly. The Routine Launcher can also open it for you.
 
 - **Load:** click **Open folder…** (or **Open file(s)…** to pick the files). It
   remembers them for next time.
@@ -65,7 +76,7 @@ files directly.
 
 ## The routine launcher
 
-![The routine launcher UI](<./Routines.png>)
+![The routine launcher UI](./Routines.png)
 
 The routine launcher is a desktop menu for your agent. Ask the agent to run
 `routine_launcher.py` — a picker dialog pops up listing the available routines (search
@@ -97,19 +108,43 @@ filling.
 
 ## Setup
 
-Easiest path: **ask the agent to set it up.** The short version:
+### 1. Install Prerequisites
 
-1. Clone the [Tab Share repo](https://github.com/yoavdim/tab-share) somewhere convenient:
+You will need Python 3 and PyQt5 to run the desktop launcher. `curl` and `git` are also required, but *only* for running the installer script.
+
+Run the command for your operating system:
+
+- **Ubuntu / Debian:** `sudo apt update && sudo apt install python3 python3-pyqt5 curl git`
+- **Mac:** `brew install python3 curl git`
+- **Windows:** `winget install Python.Python.3.11 Git.Git ezwinports.curl` *(Windows users should run the next step in Git Bash)*
+
+*(If you are on Mac or Windows, the installer script will attempt to install PyQt5 via `pip` if it's missing).*
+
+### 2. Run the Installer
+
+Run this single command to clone the repo, set up your data files, and optionally configure the Tab Share browser extension:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/yoavdim/agentic-job-finder/master/install.sh)"
+```
+
+The script will guide you through the rest.
+
+### Manual Setup (Fallback)
+
+If you prefer not to use the automated installer, you can set everything up manually:
+
+1. Clone this repo and the [Tab Share repo](https://github.com/yoavdim/tab-share) somewhere convenient:
    `git clone https://github.com/yoavdim/tab-share.git`
-2. Load it in Chromium first to get its extension ID: `chrome://extensions` → Developer
+2. Load Tab Share in Chromium first to get its extension ID: `chrome://extensions` → Developer
    mode → **Load unpacked** → pick the repo's `chromium/` folder. Copy the 32-char ID.
 3. Register the native host with that ID: `chromium/install.sh <EXTENSION_ID>` (or
    `install_snap.sh <EXTENSION_ID>` for snap Chromium). Then reload the extension.
 4. Check it's alive: `curl -s http://localhost:8766/tabs` should return JSON.
-5. Fill in your profile, point the agent at your resume, and ask for a search pass.
+5. In this repository, manually generate your data files: `python3 .kiro/scripts/ensure_data_files.py --apply`
+6. Fill in your profile in `.kiro/steering/job-search-prefs.md`, point the agent at your resume, and ask for a search pass.
 
-> Full instructions (Firefox build, snap paths, troubleshooting) live in the repo's
-> `INSTALL.md`.
+> Full instructions (Firefox build, snap paths, troubleshooting) live in the tab-share repo's `INSTALL.md`.
 
 ## The magic behind the scenes
 
@@ -137,25 +172,24 @@ static HTML file:
 
 ## What's in here
 
-| File | Purpose |
-| --- | --- |
-| `.kiro/steering/` | Steering files — search playbook, job preferences, run config, watchlist scraper instructions. Auto-loaded by the agent. |
-| `.kiro/skills/simplify-tracker-sync/` | Agent skill for syncing the Simplify.jobs tracker + harvesting saved searches. |
-| `routine_launcher.py` | PyQt5 desktop launcher — pick a routine, get the prompt. |
-| `tracker.html` | Browser UI over the `.md` files. |
-| `shortlist.md` | Candidate roles, tiered, with status boxes + comments. *(Yours — local only.)* |
-| `applied.md` | Applied / saved / rejected tracker; dedup source. *(Yours — local only.)* |
-| `watchlist.md` | Company watchlist + scraped-postings inbox. *(Yours — local only.)* |
-| `manual.md` | URL inbox — paste a job link and the agent files it. *(Yours — local only.)* |
-| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data**.|
+| File                                            | Purpose                                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `.kiro/steering/`                             | Steering files — search playbook, job preferences, run config, watchlist scraper instructions. Auto-loaded by the agent. |
+| `.kiro/skills/simplify-tracker-sync/`         | Agent skill for syncing the Simplify.jobs tracker + harvesting saved searches.                                            |
+| `routine_launcher.py`                         | PyQt5 desktop launcher — pick a routine, get the prompt.                                                                 |
+| `tracker.html`                                | Browser UI over the`.md` files.                                                                                         |
+| `shortlist.md`                                | Candidate roles, tiered, with status boxes + comments.*(Yours — local only.)*                                          |
+| `applied.md`                                  | Applied / saved / rejected tracker; dedup source.*(Yours — local only.)*                                               |
+| `watchlist.md`                                | Company watchlist + scraped-postings inbox.*(Yours — local only.)*                                                     |
+| `manual.md`                                   | URL inbox — paste a job link and the agent files it.*(Yours — local only.)*                                           |
+| `shortlist.sample.md` / `applied.sample.md` | **Fictional demo data**.                                                                                            |
 
 > `.agents/` is a symlink to `.kiro/`, so the skills and steering files are discoverable
 > by any AI coding tool that follows the `.agents/` convention.
 
 > Your real `shortlist.md` / `applied.md` / `watchlist.md` / `manual.md` are **git-ignored**
 > so personal data never gets committed. Only the `*.sample.md` files ship with the repo. To
-> start: copy a sample to the real name (`cp shortlist.sample.md shortlist.md`), or open a
-> sample straight from `tracker.html` via **Open file(s)…**.
+> start: copy a sample to the real name (`cp shortlist.sample.md shortlist.md`)
 
 ## License
 
