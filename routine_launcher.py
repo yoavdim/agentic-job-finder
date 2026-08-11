@@ -96,12 +96,11 @@ ROUTINES = [
      "Fill the empty CSS Selector cells in watchlist.md's `## Companies` via the selector "
      "pass. LLM-dependent: probe candidate selectors live, iterate, then commit each "
      "winner with `watchlist_selectors.py write --apply`."),
-    ("no-llm-sweep", "No-LLM sweep", "#3ecf8e", "0b + 0e + 0f — fully scripted",
+    ("no-llm-sweep", "No-LLM sweep", "#3ecf8e", "maintenance: 0b + 0e + 0f — fully scripted",
      "`no_llm_sweep.py` — the fully-scripted maintenance stages (Simplify sync, resolved "
      "migration, liveness sweep). Applies by default; it pre-flights `check_browser_saved`."),
-    ("stage0", "Stage 0 only", "#f0a850", "Maintenance 0a–0f",
-     "The whole stage-0 maintenance pass (0a–0f), including the LLM-judgment parts "
-     "(fold thoughts, process manual URLs). 0b/0e/0f can be run together via `no_llm_sweep.py`."),
+    ("stage0", "Stage 0 only", "#f0a850", "Maintenance",
+     "The whole stage-0 maintenance pass (0a–0f)"),
     ("reject-shortlist", "Reject / flush all", "#ef5350", "The shortlist's 'flush'",
      ""),
     ("view-in-chrome", "View tracker in Chrome", "#4fc1f0", "opens tracker.html",
@@ -177,8 +176,22 @@ def no_llm_sweep_prompt():
     return "Run the no-LLM sweep script (applies 0b + 0e + 0f)."
 
 
-def stage0_prompt():
-    return "Run full stage 0 per `.kiro/steering/search-playbook.md`."
+def stage0_prompt(stages, requires, checked, file_issues=()):
+    plan = [(sid, label) for sid, label, _, _d in stages if sid is not None and sid in checked and sid.startswith("0")]
+    issues = validate_plan(requires, checked)
+    lines = [
+        "Run the Stage 0 maintenance pass per `.kiro/steering/search-playbook.md`.",
+        "",
+        "Run plan:",
+    ]
+    lines += [f"- `{sid}` — {label}" for sid, label in plan]
+    if not plan:
+        lines.append("- (none selected)")
+    if issues:
+        lines += ["", "Plan warnings:"] + [f"- {i}" for i in issues]
+    if file_issues:
+        lines += ["", "run-config.md problems:"] + [f"- {i}" for i in file_issues]
+    return "\n".join(lines)
 
 
 def reject_shortlist_prompt(reason):
@@ -195,10 +208,10 @@ def css_selectors_prompt():
 
 PROMPT_BUILDERS = {
     "search": None,  # needs the live stage selection; handled in the dialog
+    "stage0": None,  # needs the live stage selection; handled in the dialog
     "scrape": scrape_prompt,
     "css-selectors": css_selectors_prompt,
     "no-llm-sweep": no_llm_sweep_prompt,
-    "stage0": stage0_prompt,
     "reject-shortlist": lambda reason: reject_shortlist_prompt(reason),
 }
 
@@ -208,8 +221,9 @@ def build_prompt(routine, stages, requires, checked, file_issues=(), reason="not
     `reason` only for reject-shortlist. Routines in NO_PROMPT_ROUTINES have no prompt."""
     if routine in NO_PROMPT_ROUTINES:
         return ""
-    if routine == "search":
-        return search_prompt(stages, requires, checked, file_issues)
+    if routine in ("search", "stage0"):
+        prompt_fn = search_prompt if routine == "search" else stage0_prompt
+        return prompt_fn(stages, requires, checked, file_issues)
     if routine == "reject-shortlist":
         return PROMPT_BUILDERS[routine](reason)
     return PROMPT_BUILDERS[routine]()
@@ -592,6 +606,7 @@ def run_dialog(config_path, argv=None):
 
     # --- search: run-config stage plan ---
     stage_checks = {}
+    stage_widgets = []
     search_card, search_v = card("search")
     scroller = QtWidgets.QScrollArea()
     scroller.setWidgetResizable(True)
@@ -606,6 +621,7 @@ def run_dialog(config_path, argv=None):
             sec.setObjectName("muted")
             sec.setStyleSheet("margin-top:8px; margin-bottom:2px; font-weight:600;")
             inner_v.addWidget(sec)
+            stage_widgets.append((None, label, sec))
             continue
         cb = QtWidgets.QCheckBox(f"{sid} — {label}")
         cb.setChecked(checked)
@@ -614,6 +630,7 @@ def run_dialog(config_path, argv=None):
             cb.setStyleSheet("margin-left:22px;")
         stage_checks[sid] = cb
         inner_v.addWidget(cb)
+        stage_widgets.append((sid, label, cb))
     inner_v.addStretch(1)
     scroller.setWidget(inner)
     search_v.addWidget(scroller, 1)
@@ -792,9 +809,25 @@ def run_dialog(config_path, argv=None):
 
     def refresh():
         routine = current_routine()
-        stack.setCurrentIndex(stack_keys.index(routine))
-        if routine == "search":
-            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked()}
+        stack_routine = "search" if routine in ("search", "stage0") else routine
+        stack.setCurrentIndex(stack_keys.index(stack_routine))
+        if routine in ("search", "stage0"):
+            is_stage0 = (routine == "stage0")
+            t_label = search_card.findChild(QtWidgets.QLabel, "card-title")
+            d_label = search_card.findChild(QtWidgets.QLabel, "desc")
+            if t_label and d_label:
+                row = next(r for r in ROUTINES if r[0] == routine)
+                t_label.setText(row[1])
+                d_label.setText(row[4])
+
+            for sid, label, widget in stage_widgets:
+                if sid is None:
+                    visible = not is_stage0 or "Stage 0" in label
+                else:
+                    visible = not is_stage0 or sid.startswith("0")
+                widget.setVisible(visible)
+
+            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and cb.isVisible()}
             issues = validate_plan(requires, checked)
             if issues:
                 validation.setText("\n".join("• " + i for i in issues))
@@ -806,7 +839,7 @@ def run_dialog(config_path, argv=None):
                 validation.setText("No stages selected.")
                 validation.setStyleSheet("color:#98a0b0;")
             preview.setPlainText(
-                build_prompt("search", stages, requires, checked, file_issues))
+                build_prompt(routine, stages, requires, checked, file_issues))
         elif routine == "reject-shortlist":
             flush = reject_modes["flush"].isChecked()
             rlabel.setVisible(not flush)
@@ -847,8 +880,8 @@ def run_dialog(config_path, argv=None):
         routine = current_routine()
         if routine in NO_PROMPT_ROUTINES:
             return  # the button is disabled; this is just a guard
-        if routine == "search":
-            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked()}
+        if routine in ("search", "stage0"):
+            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and cb.isVisible()}
             if not checked:
                 QtWidgets.QMessageBox.warning(dialog, "No stages",
                                               "Select at least one stage to run.")
