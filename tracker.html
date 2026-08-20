@@ -13,7 +13,8 @@
   *{box-sizing:border-box}
   body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
        background:var(--bg);color:var(--text)}
-  header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--border);
+  .sticky-top{position:sticky;top:0;z-index:5;background:var(--bg);}
+  header{background:var(--panel);border-bottom:1px solid var(--border);
          padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   header h1{font-size:15px;margin:0 12px 0 0;font-weight:600}
   button{background:var(--panel2);color:var(--text);border:1px solid var(--border);
@@ -42,6 +43,17 @@
                color:var(--text);font-size:13px;align-items:center;gap:12px}
   #splitBanner.show{display:flex}
   #splitBanner b{color:var(--warn)}
+  #seenBanner{display:none;padding:10px 16px;border-bottom:1px solid;font-size:13px;align-items:center;gap:12px;flex-wrap:wrap}
+  #seenBanner.show{display:flex}
+  #seenBanner.seen-applied{background:rgba(62,207,142,.10);border-color:var(--good);color:var(--text)}
+  #seenBanner.seen-rejected{background:rgba(239,83,80,.10);border-color:#e0585a;color:var(--text)}
+  #seenBanner.seen-flushed{background:rgba(255,167,38,.10);border-color:#ffb74d;color:var(--text)}
+  #seenBanner .seen-pill{font-weight:700;padding:2px 10px;border-radius:12px;font-size:12px;white-space:nowrap}
+  #seenBanner.seen-applied .seen-pill{background:rgba(62,207,142,.18);color:var(--good)}
+  #seenBanner.seen-rejected .seen-pill{background:rgba(239,83,80,.18);color:#ff8a8a}
+  #seenBanner.seen-flushed .seen-pill{background:rgba(255,167,38,.18);color:#ffd180}
+  #seenBanner .seen-dismiss{margin-left:auto;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;line-height:1}
+  #seenBanner .seen-dismiss:hover{color:var(--text)}
   tr.sel td{background:rgba(91,157,255,.14)}
   tbody tr{cursor:pointer}
   .sec{margin:22px 0 8px;font-size:16px;font-weight:600;color:#cdd4e0;border-bottom:1px solid var(--border);padding-bottom:4px}
@@ -126,6 +138,7 @@
 </style>
 </head>
 <body>
+<div class="sticky-top">
 <header>
   <h1>Job Tracker</h1>
   <button id="openSimplify" class="logo-btn" title="Simplify tracker — opens in the split pane"
@@ -149,6 +162,13 @@
   <span id="status" class="status">No files loaded.</span>
 </header>
 <div id="splitBanner"></div>
+<div id="seenBanner"></div>
+<template id="seenTpl">
+  <span class="seen-pill"></span>
+  <span class="seen-msg"><span class="seen-text"></span><span class="seen-meta" style="color:var(--muted);font-size:12px"></span></span>
+  <button class="seen-dismiss" title="Dismiss">✕</button>
+</template>
+</div>
 <div class="tabs" id="tabs"></div>
 <main id="main">
   <div class="empty">
@@ -248,6 +268,7 @@ const TAB_SHARE = navigator.userAgent.includes("Firefox") ? "http://localhost:87
 let tsAvailable = false;      // extension reachable
 let tsSupportsSplit = false;  // splitViewId field present
 let partnerTabId = null;      // the split-partner tab to navigate
+let _seenBannerDismissed = null; // URL that was dismissed; cleared when partner URL changes
 
 function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = "status" + (cls?(" "+cls):""); }
 
@@ -1870,7 +1891,7 @@ document.addEventListener("keydown", e=>{
 // ---------- row selection / preview ----------
 function firstUrl(cells){
   for (const c of cells){
-    const m = c.match(/\]\((https?:\/\/[^)]+)\)/) || c.match(/(https?:\/\/[^\s)]+)/);
+    const m = c.match(/\]\(<?(https?:\/\/[^)>]+)>?\)/) || c.match(/(https?:\/\/[^\s)>]+)/);
     if (m) return m[1];
   }
   return null;
@@ -1896,7 +1917,12 @@ async function openInSplit(url){
     });
     const j = await r.json();
     if (j.error) setStatus("Navigate failed: "+j.error, "dirty");
-    else setStatus("Opened in split pane");
+    else {
+      setStatus("Opened in split pane");
+      _lastPolledSplitUrl = url;
+      _seenBannerDismissed = null;
+      updateSeenBanner(findSeenEntry(url));
+    }
   }catch(e){ setStatus("Tab Share error: "+e.message, "dirty"); }
 }
 
@@ -2279,6 +2305,75 @@ window.addEventListener("beforeunload", e=>{
 initTabShare();
 // try to restore cached file handles (silent if permission still granted)
 restoreHandles().catch(()=>{});
+
+// ---------- Split-tab "already seen" banner ----------
+
+function canonUrl(u){
+  try { const p = new URL(u); return (p.hostname + p.pathname.replace(/\/+$/, "")).toLowerCase(); }
+  catch(_){ return u.toLowerCase(); }
+}
+
+function findSeenEntry(url){
+  const key = canonUrl(url);
+  for (const [name, f] of files)
+    for (const tbl of f.tables){
+      const roleCol = tbl.headers.findIndex(h => h.toLowerCase() === "role");
+      const statusCol = tbl.headers.findIndex(h => h.toLowerCase() === "status");
+      for (const row of tbl.rows){
+        if (canonUrl(firstUrl(row.cells) || "") !== key) continue;
+        const chk = tbl.chkCol != null ? row.cells[tbl.chkCol] || "" : "";
+        const sv = statusCol >= 0 ? (row.cells[statusCol] || "").toLowerCase().trim() : "";
+        let status = isRejected(chk) ? "rejected" : isApplied(chk) ? "applied"
+                     : (sv === "applied" || sv === "rejected" ? sv : null);
+        if (!status && tbl.sectionTitle && /scraped-flushed/i.test(tbl.sectionTitle)) status = "flushed";
+        if (!status) continue;
+        const cmt = tbl.commentCol != null ? row.cells[tbl.commentCol] || "" : "";
+        return { status, role: roleCol >= 0 ? row.cells[roleCol] : null, file: name,
+                 reason: (cmt.match(/^([a-z][a-z0-9-]*)/) || [])[1] || null };
+      }
+    }
+  return null;
+}
+
+const SEEN_INFO = { applied:["✓ Applied","Already applied"], rejected:["✕ Rejected","Already rejected"],
+                    flushed:["⚠️ Flushed","Possibly old listing — flushed"] };
+
+function updateSeenBanner(hit){
+  const b = $("#seenBanner");
+  if (!hit){ b.classList.remove("show","seen-applied","seen-rejected","seen-flushed"); return; }
+  const [pill,msg] = SEEN_INFO[hit.status] || ["?",hit.status];
+  const frag = $("#seenTpl").content.cloneNode(true);
+  frag.querySelector(".seen-pill").textContent = pill;
+  const esc = s => (s||"").replace(/</g,"&lt;");
+  frag.querySelector(".seen-text").innerHTML = msg
+    + (hit.role ? ` — <b>${esc(hit.role)}</b>` : "")
+    + (hit.reason ? ` (${esc(hit.reason)})` : "");
+  frag.querySelector(".seen-meta").textContent = " in " + hit.file;
+  frag.querySelector(".seen-dismiss").onclick = () => { _seenBannerDismissed = _lastPolledSplitUrl; updateSeenBanner(null); };
+  b.className = "seen-" + hit.status;
+  b.replaceChildren(frag);
+  b.classList.add("show");
+}
+
+let _lastPolledSplitUrl = null;
+
+async function pollSplitTabForSeen(){
+  if (!tsAvailable || partnerTabId == null){ updateSeenBanner(null); return; }
+  if (!files.size) return;
+  try {
+    const r = await fetch(TAB_SHARE + "/tabs", { cache:"no-store", headers:{"X-Tab-Url":location.href} });
+    if (!r.ok) return;
+    const pUrl = ((await r.json()).tabs || []).find(t => t.id === partnerTabId)?.url;
+    if (!pUrl || pUrl === location.href){ updateSeenBanner(null); return; }
+    if (pUrl !== _lastPolledSplitUrl) _seenBannerDismissed = null;
+    _lastPolledSplitUrl = pUrl;
+    if (_seenBannerDismissed !== pUrl) updateSeenBanner(findSeenEntry(pUrl));
+  } catch(_){}
+}
+
+window.addEventListener("focus", pollSplitTabForSeen);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pollSplitTabForSeen(); });
+setInterval(pollSplitTabForSeen, 3000);
 </script>
 </body>
 </html>

@@ -27,7 +27,7 @@ When running a search according to the playbook, run only the stages which are c
 
 ## Stage 2 — Wrap-up
 
-- [X] `2a` [Open keepers, close Scratch](search-playbook.md#stage-2a)
+- [ ] `2a` [Open keepers, close Scratch](search-playbook.md#stage-2a)
 - [X] `2b` [Bump headers](search-playbook.md#stage-2b)
 
 ## Profiles
