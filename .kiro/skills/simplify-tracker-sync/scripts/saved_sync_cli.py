@@ -43,6 +43,7 @@ PT = _load("parse_tracker", HERE / "parse_tracker.py")
 SS = _load("saved_sync", HERE / "saved_sync.py")
 SA = _load("simplify_actions", HERE / "simplify_actions.py")
 CAP = _load("simplify_capture", HERE / "simplify_capture.py")
+CBS = _load("check_browser_saved", HERE.parent.parent.parent / "scripts" / "check_browser_saved.py")
 
 
 def read_local_saved(applied_lines):
@@ -181,6 +182,9 @@ def main(argv=None):
     ap.add_argument("--json", help="write the plan/outcomes as JSON here ('-' = stdout)")
     args = ap.parse_args(argv)
 
+    if not CBS.confirm_browser_saved():
+        return 2
+
     today = datetime.date.fromisoformat(args.today)
 
     # ---- 1. capture (read-only, via the tracker API — no scraping) --------------
@@ -257,13 +261,13 @@ def main(argv=None):
               file=sys.stderr)
         return 0
 
-    # ---- 5. execute the pushes (the only remote mutation) -----------------------
-    tab = SA.find_tracker_tab()
-    if tab is None and SS.needs_push(decisions):
-        print("no simplify.jobs/tracker tab open — cannot push. Open it and retry.",
-              file=sys.stderr)
-        return 1
-    actions = SS.SimplifyActions(SA, tab_id=tab.get("id") if tab else None)
+    tab_id = None
+    if SS.needs_push(decisions):
+        tab_id, err = SA.ensure_tracker_tab()
+        if err:
+            print(f"{err} — cannot push.", file=sys.stderr)
+            return 1
+    actions = SS.SimplifyActions(SA, tab_id=tab_id)
     outcomes = SS.execute(decisions, actions)
     for o in outcomes:
         if o.status != SS.OUTCOME_OK:

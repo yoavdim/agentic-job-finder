@@ -28,8 +28,12 @@ Usage:
 import argparse
 import subprocess
 import sys
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
+
+import check_browser_saved
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
@@ -200,12 +204,18 @@ def main(argv=None):
     ap.add_argument("--wait", type=int, default=3, help="render wait after load")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--json", help="write the plan as JSON here ('-' = stdout)")
+    ap.add_argument("--companies", nargs="+", help="filter companies by name")
+    ap.add_argument("--to-flush", action="store_true", help="write new items to the flushed list instead of scraped list")
     args = ap.parse_args(argv)
 
     ci = ChromeInterface()
     if not ci.is_up():
         print("scrape: Tab Share not reachable on :8766/:8765 — nothing scraped",
               file=sys.stderr)
+        return 2
+
+    # Check that there are no unsaved edits in the browser
+    if not check_browser_saved.confirm_browser_saved():
         return 2
 
     # Sync Simplify tracker first so applied.md is completely up to date
@@ -216,6 +226,9 @@ def main(argv=None):
     manual = M.read_lines(args.manual)
     recorded = recorded_keys(watchlist, applied, manual)
     companies = [c for c in read_companies(watchlist) if c["selector"]]
+    if args.companies:
+        target_names = {name.lower() for name in args.companies}
+        companies = [c for c in companies if c["company"].lower() in target_names]
 
     if not companies:
         print("scrape: no watchlist company has a CSS selector yet (run the selector pass first)",
@@ -230,7 +243,7 @@ def main(argv=None):
         print(f"  {r['company']}: {len(r['new'])} new, {r['seen']} seen"
               + (f"  [{r['error']}]" if r["error"] else ""), file=sys.stderr)
 
-    new_entries = [e for r in results for e in r["new"]]
+    new_entries = [{"company": r["company"], **e} for r in results for e in r["new"]]
 
     # Detect listings that disappeared from their company's careers page,
     # or that were tracked by the sync we just ran.
@@ -256,33 +269,69 @@ def main(argv=None):
         return 0
 
     if args.apply:
+        applied_dirty = False
+        watchlist_dirty = False
+
         if new_entries:
-            watchlist = M.ensure_table(watchlist, "## Scraped (watchlist)",
-                                       ["Added", "URL", "Status"])
-            watchlist = M.insert_rows(watchlist, "## Scraped (watchlist)",
-                                      scrape_rows(args.today, new_entries),
-                                      newest_first=False)
+            if args.to_flush:
+                flushed_new = []
+                for e in new_entries:
+                    flushed_new.append({
+                        "line_idx": -1,
+                        "rejected": args.today,
+                        "company": e["company"],
+                        "role": e["title"],
+                        "url": e["url"],
+                        "reason": "other",
+                        "comment": f"watchlist scrape {args.today}, directly flushed",
+                    })
+                applied = M.ensure_table(applied, "## Scraped-flushed (watchlist)",
+                                         WF.FLUSH_HEADER)
+                applied = M.insert_rows(applied, "## Scraped-flushed (watchlist)",
+                                        [WF.render_flush(r) for r in flushed_new],
+                                        newest_first=True)
+                applied_dirty = True
+            else:
+                watchlist = M.ensure_table(watchlist, "## Scraped (watchlist)",
+                                           ["Added", "URL", "Status"])
+                watchlist = M.insert_rows(watchlist, "## Scraped (watchlist)",
+                                          scrape_rows(args.today, new_entries),
+                                          newest_first=False)
+                watchlist_dirty = True
+
         if removed:
             # Remove the gone rows from the scraped table
             watchlist = M.delete_lines(watchlist, remove_indices)
+            watchlist_dirty = True
             # Flush them into applied.md
             applied = M.ensure_table(applied, "## Scraped-flushed (watchlist)",
                                      WF.FLUSH_HEADER)
             applied = M.insert_rows(applied, "## Scraped-flushed (watchlist)",
                                     [WF.render_flush(r) for r in removed],
                                     newest_first=True)
+            applied_dirty = True
+
+        if applied_dirty:
             M.write_lines(args.applied, applied)
-        M.write_lines(args.watchlist, watchlist)
+        if watchlist_dirty:
+            M.write_lines(args.watchlist, watchlist)
+
         parts = []
         if new_entries:
-            parts.append(f"{len(new_entries)} new row(s)")
+            if args.to_flush:
+                parts.append(f"{len(new_entries)} new row(s) directly flushed")
+            else:
+                parts.append(f"{len(new_entries)} new row(s)")
         if removed:
             parts.append(f"{len(removed)} removed listing(s) flushed")
         print(f"scrape: {', '.join(parts)}", file=sys.stderr)
     else:
         parts = []
         if new_entries:
-            parts.append(f"{len(new_entries)} new row(s)")
+            if args.to_flush:
+                parts.append(f"{len(new_entries)} new row(s) to flush directly")
+            else:
+                parts.append(f"{len(new_entries)} new row(s)")
         if removed:
             parts.append(f"{len(removed)} removed listing(s) to flush")
             for r in removed:

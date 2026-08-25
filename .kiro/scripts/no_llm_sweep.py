@@ -21,7 +21,6 @@ mutation, but yes I did just read your tracker list" — not "nothing happened."
 Usage:
     no_llm_sweep.py             # applies for real (checks browser edits saved first)
     no_llm_sweep.py --dry-run   # preview only (still checks)
-    no_llm_sweep.py --yes       # acknowledge edits are saved; skip the check (scripted runs)
 
 Pre-flight: reads the .md files from disk, but tracker.html edits only reach disk when the
 user clicks Save changes in the browser. check_browser_saved.py asks every open
@@ -57,7 +56,7 @@ def main(argv=None):
     # invisible to this run and its writes can clobber those edits. check_browser_saved
     # finds every open tracker.html tab via Tab Share and asks whether its Save button is
     # enabled; if any tab is dirty it waits for the user to save in the browser.
-    if not check_browser_saved.confirm_browser_saved(args):
+    if not check_browser_saved.confirm_browser_saved():
         print("Aborted: save tracker.html edits in the browser before running the sweep.",
               file=sys.stderr)
         return 2
@@ -71,8 +70,11 @@ def main(argv=None):
         return 2
 
     ok = True
+    skip_liveness = "--skip-liveness-sweep" in args
     for sid, (script, script_args) in STAGE_SCRIPTS.items():
         if sid not in members:
+            continue
+        if skip_liveness and sid == "0f":
             continue
         cmd = [sys.executable, str(script)] + script_args + (["--apply"] if apply_ else [])
         print(f"\n=== {sid} ===", file=sys.stderr)

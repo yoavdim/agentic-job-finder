@@ -19,7 +19,7 @@ enabled. If any tab has unsaved edits it prints the tab and **waits for you to s
 the browser**, re-checking after each Enter; it only proceeds once every tab is saved —
 "Wait until you save? [Y/n]" defaults to yes (Enter keeps waiting), and only an explicit
 `n` proceeds despite unsaved edits. Exit 0 = all saved / you confirmed; 2 = aborted. Do not
-skip this step; `--yes` acknowledges for scripted runs and skips the check.
+skip this step.
 
 `no_llm_sweep.py` runs this same check itself before any stage executes.
 
@@ -134,7 +134,7 @@ ci = CI.ChromeInterface()
 tid = ci.open_loaded('https://builtintoronto.com/jobs/dev-engineering/entry-level')
 ci.scroll(tid)
 ci.close_modals(tid)
-print(ci.extract(tid)['text'])
+import json; print(json.dumps(ci.extract(tid)['links'], indent=2))
 "
 ```
 `/extract` with a bare `url` and no `tabId` reads whatever tab is currently **active**, not

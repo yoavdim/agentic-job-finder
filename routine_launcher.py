@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -172,7 +173,9 @@ def scrape_prompt():
     return "Run the watchlist scrape per `.kiro/steering/watchlist-scraper.md`."
 
 
-def no_llm_sweep_prompt():
+def no_llm_sweep_prompt(skip_liveness=False):
+    if skip_liveness:
+        return "Run the no-LLM sweep script with `--skip-liveness-sweep` (applies 0b + 0e, skips 0f)."
     return "Run the no-LLM sweep script (applies 0b + 0e + 0f)."
 
 
@@ -202,8 +205,19 @@ def flush_scraped_prompt():
     return "Flush all unmarked watchlist scrape rows."
 
 
-def css_selectors_prompt():
-    return "Run the CSS selector pass per `.kiro/steering/watchlist-scraper.md`."
+def css_selectors_prompt(companies=(), flush=False):
+    if not companies:
+        return ""
+    
+    base = "Run the CSS selector pass per `.kiro/steering/watchlist-scraper.md`."
+    co_list = ", ".join(companies)
+    base += f"\n\nCompanies to find selectors for: {co_list}."
+    
+    if flush:
+        args = " ".join(f'"{c}"' if " " in c else c for c in companies)
+        base += f"\n\nAfter adding the selectors, run `watchlist_scrape.py --apply --to-flush --companies {args}` to flush their first scrape."
+    
+    return base
 
 
 PROMPT_BUILDERS = {
@@ -226,7 +240,34 @@ def build_prompt(routine, stages, requires, checked, file_issues=(), reason="not
         return prompt_fn(stages, requires, checked, file_issues)
     if routine == "reject-shortlist":
         return PROMPT_BUILDERS[routine](reason)
+    if routine == "css-selectors":
+        return PROMPT_BUILDERS[routine](checked)  # `checked` reused as company set
     return PROMPT_BUILDERS[routine]()
+
+
+def parse_watchlist_companies(watchlist_path):
+    """Return list of (company_name, has_selector) from watchlist.md ## Companies."""
+    try:
+        text = Path(watchlist_path).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    m = re.search(r"^## Companies\s*\n(.*?)(?=^##|\Z)", text, re.I | re.M | re.S)
+    if not m:
+        return []
+    rows = [r for r in m.group(1).splitlines() if r.startswith("|") and not re.match(r"^[|\- ]+$", r)]
+    if len(rows) < 2:
+        return []
+    hdr = [h.strip().lower() for h in rows[0].strip("|").split("|")]
+    try:
+        ci, si = hdr.index("company"), hdr.index("css selector")
+    except ValueError:
+        return []
+    result = []
+    for r in rows[1:]:
+        c = [x.strip() for x in r.strip("|").split("|")]
+        if len(c) > si and c[ci]:
+            result.append((c[ci], bool(c[si])))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +608,7 @@ def run_dialog(config_path, argv=None):
         run_btn.setCursor(QtCore.Qt.PointingHandCursor)
         lay.addWidget(run_btn)
         run_status = QtWidgets.QLabel("")
+        run_status.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         run_status.setObjectName("muted")
         run_status.setWordWrap(True)
         lay.addWidget(run_status)
@@ -657,6 +699,7 @@ def run_dialog(config_path, argv=None):
     chip_row.addStretch(1)
     search_v.addLayout(chip_row)
     validation = QtWidgets.QLabel("")
+    validation.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
     validation.setWordWrap(True)
     search_v.addWidget(validation)
     stack.addWidget(search_card)
@@ -724,6 +767,7 @@ def run_dialog(config_path, argv=None):
             run_btn.setCursor(QtCore.Qt.PointingHandCursor)
             lay.addWidget(run_btn)
             run_status = QtWidgets.QLabel("")
+            run_status.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             run_status.setObjectName("muted")
             run_status.setWordWrap(True)
             lay.addWidget(run_status)
@@ -742,7 +786,13 @@ def run_dialog(config_path, argv=None):
                 run_status.setStyleSheet("color:#98a0b0;")
                 run_status.setText(running)
                 err_tail.clear()
-                proc.start(sys.executable, [str(script)] + list(args))
+                try:
+                    current_args = args() if callable(args) else args
+                    proc.start(sys.executable, [str(script)] + list(current_args))
+                except Exception as exc:
+                    run_btn.setEnabled(True)
+                    traceback.print_exc()
+                    QtWidgets.QMessageBox.critical(dialog, "Launch error", str(exc))
 
             def _done(code, _status):
                 run_btn.setEnabled(True)
@@ -761,23 +811,61 @@ def run_dialog(config_path, argv=None):
             return run_btn, run_status
 
         if key == "no-llm-sweep":
+            skip_cb = QtWidgets.QCheckBox("Skip liveness sweep (--skip-liveness-sweep)")
+            skip_cb.stateChanged.connect(lambda _s: refresh())
+            lay.addWidget(skip_cb)
+            lay.setProperty("skip_cb", skip_cb)
+            lay.addSpacing(6)
             add_run_button(
-                lay,
-                lambda: (HERE / ".kiro" / "scripts" / "no_llm_sweep.py", ()),
+                HERE / ".kiro" / "scripts" / "no_llm_sweep.py",
+                lambda: ("--skip-liveness-sweep",) if skip_cb.isChecked() else (),
                 running="Running no_llm_sweep.py…",
                 done_msg="Done — sweep applied (exit 0).")
         elif key == "scrape":
             add_run_button(
-                lay,
-                lambda: (HERE / ".kiro" / "scripts" / "watchlist_scrape.py", ("--apply",)),
+                HERE / ".kiro" / "scripts" / "watchlist_scrape.py",
+                ("--apply",),
                 running="Running watchlist_scrape.py --apply…",
                 done_msg="Done — scrape applied (exit 0).")
+        elif key == "css-selectors":
+            missing = [n for n, has_sel in parse_watchlist_companies(HERE / "watchlist.md") if not has_sel]
+            selector_checks = {}
+            lbl_text = "Companies without a selector — choose which to include:" if missing else "All companies already have CSS selectors."
+            lbl = QtWidgets.QLabel(lbl_text)
+            lbl.setObjectName("muted"); lbl.setWordWrap(True)
+            lay.addWidget(lbl)
+            for name in missing:
+                cb = QtWidgets.QCheckBox(name)
+                cb.setChecked(True)
+                cb.stateChanged.connect(lambda _s: refresh())
+                lay.addWidget(cb)
+                selector_checks[name] = cb
+            if selector_checks:
+                chip_row2 = QtWidgets.QHBoxLayout()
+                chip_row2.setSpacing(8)
+                for chip_name, val in (("All", True), ("None", False)):
+                    b2 = QtWidgets.QPushButton(chip_name)
+                    b2.setObjectName("chip"); b2.setCursor(QtCore.Qt.PointingHandCursor)
+                    b2.clicked.connect(lambda _c, v=val: [cb.setChecked(v) for cb in selector_checks.values()])
+                    chip_row2.addWidget(b2)
+                chip_row2.addStretch(1)
+                lay.addLayout(chip_row2)
+
+            lay.addSpacing(6)
+            flush_cb = QtWidgets.QCheckBox("Flush these companies after scraping (the first scrape is meaningless)")
+            flush_cb.setChecked(True)
+            flush_cb.stateChanged.connect(lambda _s: refresh())
+            lay.addWidget(flush_cb)
+            lay.setProperty("flush_cb", flush_cb)
+
+            lay.setProperty("selector_checks", selector_checks)
         elif key == "view-in-chrome":
             open_btn = QtWidgets.QPushButton("Open tracker in Chrome")
             open_btn.setObjectName("primary")
             open_btn.setCursor(QtCore.Qt.PointingHandCursor)
             lay.addWidget(open_btn)
             open_status = QtWidgets.QLabel("")
+            open_status.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             open_status.setObjectName("muted")
             open_status.setWordWrap(True)
             lay.addWidget(open_status)
@@ -793,8 +881,7 @@ def run_dialog(config_path, argv=None):
         stack_keys.append(key)
 
     # --- live preview ---
-    preview_label = QtWidgets.QLabel(
-        "Prompt — goes to stdout and the clipboard when emitted:")
+    preview_label = QtWidgets.QLabel("Prompt — goes to stdout and the clipboard when emitted:")
     preview_label.setObjectName("muted")
     body.addWidget(preview_label)
     preview = QtWidgets.QPlainTextEdit()
@@ -827,7 +914,7 @@ def run_dialog(config_path, argv=None):
                     visible = not is_stage0 or sid.startswith("0")
                 widget.setVisible(visible)
 
-            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and cb.isVisible()}
+            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and (not is_stage0 or sid.startswith("0"))}
             issues = validate_plan(requires, checked)
             if issues:
                 validation.setText("\n".join("• " + i for i in issues))
@@ -854,6 +941,24 @@ def run_dialog(config_path, argv=None):
         elif routine in NO_PROMPT_ROUTINES:
             preview.setPlainText("(no prompt — use the button on this routine's card)")
             emit_btn.setEnabled(False)
+        elif routine == "css-selectors":
+            emit_btn.setEnabled(True)
+            # Find the css-selectors card and read its checklist
+            css_card = stack.widget(stack_keys.index("css-selectors"))
+            css_lay = css_card.layout()
+            sel_checks = css_lay.property("selector_checks") or {}
+            selected = [name for name, cb in sel_checks.items() if cb.isChecked()]
+            
+            flush_cb = css_lay.property("flush_cb")
+            flush = flush_cb.isChecked() if flush_cb else False
+            
+            preview.setPlainText(css_selectors_prompt(selected, flush))
+        elif routine == "no-llm-sweep":
+            emit_btn.setEnabled(True)
+            sweep_card = stack.widget(stack_keys.index("no-llm-sweep"))
+            skip_cb = sweep_card.layout().property("skip_cb")
+            skip = skip_cb.isChecked() if skip_cb else False
+            preview.setPlainText(no_llm_sweep_prompt(skip))
         else:
             emit_btn.setEnabled(True)
             preview.setPlainText(PROMPT_BUILDERS[routine]())
@@ -863,6 +968,8 @@ def run_dialog(config_path, argv=None):
     btn_row = QtWidgets.QHBoxLayout()
     btn_row.setSpacing(10)
     btn_row.addStretch(1)
+    copy_btn = QtWidgets.QPushButton("⎘ Copy")
+    copy_btn.setCursor(QtCore.Qt.PointingHandCursor)
     cancel_btn = QtWidgets.QPushButton("Cancel")
     cancel_btn.setCursor(QtCore.Qt.PointingHandCursor)
     cancel_btn.clicked.connect(dialog.reject)
@@ -870,9 +977,19 @@ def run_dialog(config_path, argv=None):
     emit_btn.setObjectName("primary")
     emit_btn.setDefault(True)
     emit_btn.setCursor(QtCore.Qt.PointingHandCursor)
+    btn_row.addWidget(copy_btn)
     btn_row.addWidget(cancel_btn)
     btn_row.addWidget(emit_btn)
     body.addLayout(btn_row)
+
+    def _copy_prompt():
+        text = preview.toPlainText()
+        if text:
+            QtWidgets.QApplication.clipboard().setText(text)
+            copy_btn.setText("✓ Copied")
+            QtCore.QTimer.singleShot(1500, lambda: copy_btn.setText("⎘ Copy"))
+
+    copy_btn.clicked.connect(_copy_prompt)
 
     result = {"prompt": None}
 
@@ -881,7 +998,8 @@ def run_dialog(config_path, argv=None):
         if routine in NO_PROMPT_ROUTINES:
             return  # the button is disabled; this is just a guard
         if routine in ("search", "stage0"):
-            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and cb.isVisible()}
+            is_stage0 = (routine == "stage0")
+            checked = {sid for sid, cb in stage_checks.items() if cb.isChecked() and (not is_stage0 or sid.startswith("0"))}
             if not checked:
                 QtWidgets.QMessageBox.warning(dialog, "No stages",
                                               "Select at least one stage to run.")
@@ -974,7 +1092,7 @@ def run_dialog(config_path, argv=None):
 
     code = dialog.exec_()
     if code != QtWidgets.QDialog.Accepted or result["prompt"] is None:
-        return 2
+        return 0
 
     sys.stdout.write(result["prompt"] + "\n")
     sys.stdout.flush()

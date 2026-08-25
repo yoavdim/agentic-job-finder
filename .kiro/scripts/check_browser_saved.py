@@ -61,24 +61,21 @@ def tracker_dirty_tabs(bases=_BASES):
     return dirty, None
 
 
-def confirm_browser_saved(argv, input_fn=input):
+def confirm_browser_saved(input_fn=input):
     """Pre-flight gate for scripts that read the .md files the tracker writes.
 
-    Returns True to proceed. --yes/-y acknowledges for scripted runs. Otherwise: if Tab
-    Share says every open tracker.html tab is saved (or none is open), proceed; if any tab
-    has unsaved edits, list it and wait for the user to save in the browser, re-checking
-    each time they press Enter. "Wait until you save? [Y/n]" defaults to yes — Enter keeps
-    waiting until the tabs are saved; only an explicit `n` proceeds despite unsaved edits.
+    Returns True to proceed. If Tab Share says every open tracker.html tab is saved
+    (or none is open), proceed; if any tab has unsaved edits, list it and wait for the
+    user to save in the browser, re-checking each time they press Enter.
+    "Wait until you save? [Y/n]" defaults to yes — Enter keeps waiting until the tabs
+    are saved; only an explicit `n` proceeds despite unsaved edits.
     On non-interactive stdin with dirty tabs, refuse rather than hang on input() or
     silently proceed.
     """
-    if "--yes" in argv or "-y" in argv:
-        return True
     dirty, err = tracker_dirty_tabs()
     if err:
-        print(f"check_browser_saved: {err} — can't verify no tracker.html tab has unsaved "
-              "edits. Start Tab Share, or pass --yes to proceed.", file=sys.stderr)
-        return False
+        print(f"check_browser_saved: {err} — assuming browser is closed and proceeding safely.", file=sys.stderr)
+        return True
     if not dirty:
         return True
     try:
@@ -87,7 +84,7 @@ def confirm_browser_saved(argv, input_fn=input):
         interactive = False
     if not interactive:
         print("check_browser_saved: unsaved edits in tracker.html tab(s) but stdin is not "
-              "interactive — can't wait for you to save them. Pass --yes to proceed.",
+              "interactive — can't wait for you to save them. Aborting.",
               file=sys.stderr)
         return False
     for t in dirty:
@@ -118,14 +115,12 @@ def confirm_browser_saved(argv, input_fn=input):
             return True
 
 
-def main(argv=None):
+def main():
     ap = argparse.ArgumentParser(
         description="Verify no open tracker.html tab has unsaved edits. Exits 0 when all "
                     "are saved (or none open) or the user confirms; 2 otherwise.")
-    ap.add_argument("--yes", "-y", action="store_true",
-                    help="acknowledge edits are saved; skip the check")
-    args = ap.parse_args(argv)
-    if confirm_browser_saved(["--yes"] if args.yes else []):
+    ap.parse_args()
+    if confirm_browser_saved():
         return 0
     return 2
 

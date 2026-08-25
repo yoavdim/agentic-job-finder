@@ -253,6 +253,20 @@ def find_tracker_tab(tab_share_url="http://localhost:8766"):
     return None
 
 
+def ensure_tracker_tab(tab_share_url="http://localhost:8766"):
+    """Return the tracker tab ID, opening a new tab if one is not already open.
+    Returns (tab_id, error_message).
+    """
+    tab = find_tracker_tab(tab_share_url)
+    if tab:
+        return tab.get("id"), None
+    print("No simplify.jobs/tracker tab open — opening a new one...", file=sys.stderr)
+    tab_id = ChromeInterface(base=tab_share_url).open_loaded("https://simplify.jobs/tracker", wait=5)
+    if not tab_id:
+        return None, "No simplify.jobs/tracker tab open, and failed to open a new one"
+    return tab_id, None
+
+
 def execute_via_tab_share(plan, tab_share_url="http://localhost:8766", dry_run=True,
                           tab_id=None):
     """Execute a planned action via Tab Share /eval endpoint.
@@ -277,11 +291,10 @@ def execute_via_tab_share(plan, tab_share_url="http://localhost:8766", dry_run=T
         return result
 
     if tab_id is None:
-        tab = find_tracker_tab(tab_share_url)
-        tab_id = tab.get("id") if tab else None
-        if tab_id is None:
+        tab_id, err = ensure_tracker_tab(tab_share_url)
+        if err:
             result["status"] = "error"
-            result["error"] = "No simplify.jobs/tracker tab open — open it first"
+            result["error"] = err
             return result
 
     eval_code = _build_eval_code(plan)

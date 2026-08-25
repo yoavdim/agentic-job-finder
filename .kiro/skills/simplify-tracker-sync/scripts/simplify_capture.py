@@ -137,10 +137,9 @@ def capture(tab_id=None, size=50, archived=False, max_pages=40, tab_share_url=No
     endpoint's own `total` — a claim backed by the API, not inferred from the DOM.
     """
     if tab_id is None:
-        tab = SA.find_tracker_tab(tab_share_url) if tab_share_url else SA.find_tracker_tab()
-        if not tab:
-            return {"error": "no simplify.jobs/tracker tab open — open it first"}
-        tab_id = tab.get("id")
+        tab_id, err = SA.ensure_tracker_tab(tab_share_url or "http://localhost:8766")
+        if err:
+            return {"error": err}
 
     records, seen_ids = [], set()
     total = None

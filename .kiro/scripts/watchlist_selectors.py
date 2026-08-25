@@ -27,6 +27,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
+import check_browser_saved
 from chrome_interface import ChromeInterface
 
 
@@ -69,6 +70,8 @@ def cmd_probe(args):
 
 
 def cmd_write(args):
+    if not check_browser_saved.confirm_browser_saved():
+        return 2
     import md_tables as M
     lines = M.read_lines(args.watchlist)
     try:

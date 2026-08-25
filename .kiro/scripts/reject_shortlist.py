@@ -27,6 +27,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import check_browser_saved
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
@@ -118,6 +120,9 @@ def main(argv=None):
     ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     ap.add_argument("--json", help="write the plan as JSON here ('-' = stdout)")
     args = ap.parse_args(argv)
+
+    if not check_browser_saved.confirm_browser_saved():
+        return 2
 
     shortlist_lines = M.read_lines(args.shortlist)
     targets = open_rows(shortlist_lines)

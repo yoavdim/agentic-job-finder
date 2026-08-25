@@ -32,6 +32,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import check_browser_saved
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import md_tables as M
@@ -234,6 +236,9 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--json", help="write the plan as JSON here ('-' = stdout)")
     args = ap.parse_args(argv)
+
+    if not check_browser_saved.confirm_browser_saved():
+        return 2
 
     watchlist = M.read_lines(args.watchlist)
     applied = M.read_lines(args.applied)
