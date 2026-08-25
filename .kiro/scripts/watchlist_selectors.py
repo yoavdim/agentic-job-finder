@@ -29,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 import check_browser_saved
 from chrome_interface import ChromeInterface
+import md_tables as M
 
 
 def probe(url, selector, wait=3):
@@ -36,12 +37,11 @@ def probe(url, selector, wait=3):
     return ChromeInterface().probe(url, selector, wait=wait)
 
 
-def write_selector(lines, company, selector):
-    """Write `selector` into watchlist.md's CSS Selector cell for `company`.
+def write_selector(lines, company, selector=None, next_page=None):
+    """Write `selector` and/or `next_page` into watchlist.md's row for `company`.
 
     Returns (new_lines, changed). Raises KeyError when the company has no row.
     """
-    import md_tables as M
     t = M.find_table(lines, "## Companies")
     if t is None:
         raise KeyError("watchlist.md has no '## Companies' table")
@@ -49,9 +49,17 @@ def write_selector(lines, company, selector):
                 if r.get("company").strip().lower() == company.strip().lower()), None)
     if row is None:
         raise KeyError(f"no watchlist row for company {company!r}")
-    if row.get("selector").strip() == selector.strip():
+    
+    changed = False
+    if selector is not None and row.get("selector").strip() != selector.strip():
+        row.set("selector", selector)
+        changed = True
+    if next_page is not None and row.get("next page", "").strip() != next_page.strip():
+        row.set("next page", next_page)
+        changed = True
+
+    if not changed:
         return lines, False
-    row.set("selector", selector)
     new_lines = list(lines)
     new_lines[row.line_idx] = row.render()
     return new_lines, True
@@ -72,10 +80,9 @@ def cmd_probe(args):
 def cmd_write(args):
     if not check_browser_saved.confirm_browser_saved():
         return 2
-    import md_tables as M
     lines = M.read_lines(args.watchlist)
     try:
-        new_lines, changed = write_selector(lines, args.company, args.selector)
+        new_lines, changed = write_selector(lines, args.company, selector=args.selector, next_page=args.next_page)
     except KeyError as e:
         print(f"write: {e}", file=sys.stderr)
         return 2
@@ -108,7 +115,8 @@ def main(argv=None):
 
     w = sub.add_parser("write", help="commit a selector into watchlist.md")
     w.add_argument("--company", required=True)
-    w.add_argument("--selector", required=True)
+    w.add_argument("--selector", help="The CSS selector for the job cards")
+    w.add_argument("--next-page", help="The CSS selector for the next page button (or 'none' if N/A)")
     w.add_argument("--watchlist", default="watchlist.md")
     w.add_argument("--apply", action="store_true")
     w.set_defaults(fn=cmd_write)

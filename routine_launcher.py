@@ -260,13 +260,17 @@ def parse_watchlist_companies(watchlist_path):
     hdr = [h.strip().lower() for h in rows[0].strip("|").split("|")]
     try:
         ci, si = hdr.index("company"), hdr.index("css selector")
+        ni = hdr.index("next page") if "next page" in hdr else -1
     except ValueError:
         return []
     result = []
     for r in rows[1:]:
         c = [x.strip() for x in r.strip("|").split("|")]
-        if len(c) > si and c[ci]:
-            result.append((c[ci], bool(c[si])))
+        if len(c) > ci and c[ci]:
+            has_sel = bool(c[si]) if len(c) > si else False
+            has_next = bool(c[ni]) if ni != -1 and len(c) > ni else False
+            is_complete = has_sel and (ni == -1 or has_next)
+            result.append((c[ci], is_complete))
     return result
 
 
@@ -828,9 +832,9 @@ def run_dialog(config_path, argv=None):
                 running="Running watchlist_scrape.py --apply…",
                 done_msg="Done — scrape applied (exit 0).")
         elif key == "css-selectors":
-            missing = [n for n, has_sel in parse_watchlist_companies(HERE / "watchlist.md") if not has_sel]
+            missing = [n for n, is_complete in parse_watchlist_companies(HERE / "watchlist.md") if not is_complete]
             selector_checks = {}
-            lbl_text = "Companies without a selector — choose which to include:" if missing else "All companies already have CSS selectors."
+            lbl_text = "Companies with missing CSS or Next Page selectors:" if missing else "All companies have their selectors fully populated."
             lbl = QtWidgets.QLabel(lbl_text)
             lbl.setObjectName("muted"); lbl.setWordWrap(True)
             lay.addWidget(lbl)

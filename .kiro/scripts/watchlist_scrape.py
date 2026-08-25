@@ -26,6 +26,8 @@ Usage:
                         [--apply] [--json FILE]
 """
 import argparse
+import concurrent.futures
+import json
 import subprocess
 import sys
 import tempfile
@@ -45,7 +47,7 @@ import watchlist_flush as WF
 # ---- watchlist reading / dedup ----
 
 def read_companies(watchlist_lines):
-    """[(company, url, selector)] for `## Companies` rows that have a company + URL."""
+    """[(company, url, selector, next_page)] for `## Companies` rows that have a company + URL."""
     t = M.find_table(watchlist_lines, "## Companies")
     if t is None:
         return []
@@ -54,8 +56,12 @@ def read_companies(watchlist_lines):
         company = row.get("company").strip()
         url = M.extract_url(row.get("url")).strip()
         if company and url:
-            out.append({"company": company, "url": url,
-                        "selector": row.get("selector").strip()})
+            out.append({
+                "company": company,
+                "url": url,
+                "selector": row.get("css selector").strip(),
+                "next_page": row.get("next page", "").strip() if row.get("next page", "").strip().lower() not in {"none", "n/a", "-"} else ""
+            })
     return out
 
 
@@ -76,7 +82,7 @@ def recorded_keys(watchlist_lines, applied_lines, manual_lines):
     return keys
 
 
-def plan_company(company, url, selector, recorded, wait=3, scroll_steps=2, ci=None):
+def plan_company(company, url, selector, next_selector, recorded, wait=3, scroll_steps=2, ci=None):
     """Scrape one company. Returns a dict; mutates nothing.
 
     Entries are keyed by ats_code of the resolved URL, so the same listing extracted twice
@@ -88,29 +94,65 @@ def plan_company(company, url, selector, recorded, wait=3, scroll_steps=2, ci=No
     if not tid:
         return {"company": company, "error": f"could not open {url}", "new": [], "seen": 0}
     try:
-        ci.scroll(tid, steps=scroll_steps)
-        ci.close_modals(tid)
-        res = ci.extract_elements(tid, selector)
-        if "error" in res:
-            return {"company": company, "error": res["error"], "new": [], "seen": 0}
-        items, keys, new = res.get("items", []), set(), []
-        live_keys = set()          # every ats_code on the live page
-        for it in items:
-            title = (it.get("text") or "").strip()
-            href = (it.get("href") or "").strip()
-            if not title or not href:
-                continue
-            abs_url = resolve_href(href, origin)
-            if not abs_url:
-                continue
-            key = M.ats_code(abs_url)
-            live_keys.add(key)
-            if key in keys or key in recorded:
-                continue
-            keys.add(key)
-            new.append({"title": title, "url": abs_url, "key": key})
-        return {"company": company, "error": None, "new": new,
-                "seen": len(items), "live_keys": live_keys}
+        all_new = []
+        all_seen = 0
+        all_live_keys = set()
+        keys = set()
+        prev_page_keys = set()
+
+        for iteration in range(6):  # page 1 + up to 5 next clicks
+            ci.scroll(tid, steps=scroll_steps)
+            ci.close_modals(tid)
+            res = ci.extract_elements(tid, selector)
+            if "error" in res:
+                if iteration == 0:
+                    return {"company": company, "error": res["error"], "new": [], "seen": 0}
+                break
+
+            items = res.get("items", [])
+            page_live_keys = set()
+            for it in items:
+                title = (it.get("text") or "").strip()
+                href = (it.get("href") or "").strip()
+                if not title or not href:
+                    continue
+                abs_url = resolve_href(href, origin)
+                if not abs_url:
+                    continue
+                key = M.ats_code(abs_url)
+                page_live_keys.add(key)
+                if key in keys or key in recorded:
+                    continue
+                keys.add(key)
+                all_new.append({"title": title, "url": abs_url, "key": key})
+            
+            all_seen += len(items)
+            all_live_keys.update(page_live_keys)
+
+            if not next_selector or iteration == 5:
+                break
+            
+            if page_live_keys == prev_page_keys and iteration > 0:
+                break
+            prev_page_keys = page_live_keys
+
+            click_res = ci.eval(tid, f"""
+                (() => {{
+                    const btn = document.querySelector("{next_selector}");
+                    if (btn && !btn.disabled && btn.offsetParent !== null) {{
+                        btn.click();
+                        return true;
+                    }}
+                    return false;
+                }})()
+            """)
+            if not click_res:
+                break
+            
+            time.sleep(wait)
+
+        return {"company": company, "error": None, "new": all_new,
+                "seen": all_seen, "live_keys": all_live_keys}
     finally:
         ci.close([tid], expect_host="*")
 
@@ -236,12 +278,23 @@ def main(argv=None):
         return 0
 
     results = []
-    for c in companies:
-        r = plan_company(c["company"], c["url"], c["selector"], recorded,
-                         wait=args.wait, scroll_steps=args.scroll_steps, ci=ci)
-        results.append(r)
-        print(f"  {r['company']}: {len(r['new'])} new, {r['seen']} seen"
-              + (f"  [{r['error']}]" if r["error"] else ""), file=sys.stderr)
+    
+    def scrape_company_wrapper(c):
+        return plan_company(c["company"], c["url"], c["selector"], c["next_page"], recorded,
+                            wait=args.wait, scroll_steps=args.scroll_steps, ci=ci)
+
+    # Use max_workers=8 to open up to 8 tabs concurrently in Tab Share
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_c = {executor.submit(scrape_company_wrapper, c): c for c in companies}
+        for future in concurrent.futures.as_completed(future_to_c):
+            c = future_to_c[future]
+            try:
+                r = future.result()
+                results.append(r)
+                print(f"  {r['company']}: {len(r['new'])} new, {r['seen']} seen"
+                      + (f"  [{r['error']}]" if r["error"] else ""), file=sys.stderr)
+            except Exception as exc:
+                print(f"  {c['company']} generated an exception: {exc}", file=sys.stderr)
 
     new_entries = [{"company": r["company"], **e} for r in results for e in r["new"]]
 

@@ -9,7 +9,7 @@ scripted with no LLM and no human dialogs. All browser work goes through the sha
 ## Data model
 
 - `watchlist.md` → `## Companies` holds the vetted targets:
-  `| Added | Company | URL | CSS Selector | Referee |`. **CSS Selector is the only column a
+  `| Added | Company | URL | CSS Selector | Next Page | Referee |`. **CSS Selector and Next Page are the only columns a
   script writes** — everything else is edited via `tracker.html`.
 - `watchlist.md` → `## Scraped (watchlist)` is the working inbox, manual.md format
   `| Added | URL | Status |`. The title is bundled in the URL cell as `[Title](<url>)`.
@@ -20,27 +20,48 @@ scripted with no LLM and no human dialogs. All browser work goes through the sha
 - `applied.md` → `## Scraped-flushed (watchlist)` is the permanent dedup record:
   `| Rejected | Company | Role | URL | Reason | Comment |`. It is the seen-store for the scrape.
 
-## Pick a CSS selector per company (LLM)
+## Fill Selectors for the Watchlist (LLM Task)
 
-The LLM decides; `watchlist_selectors.py` is the deterministic probe + write-back tool:
+**The Goal:** For any company missing selectors in `watchlist.md`, your task is to find and record two CSS selectors:
 
-1. Probe a candidate selector live:
-   ```bash
-   python3 .kiro/scripts/watchlist_selectors.py probe \
-     --url "<careers-url>" --selector "a[data-automation-id='jobTitle']"
-   ```
-   It opens the URL in a Scratch tab, scrolls, dismisses consent modals, extracts every
-   matching element, closes the tab, and prints `{ok, count, samples}` as JSON. Iterate:
-   - **0 matches** → selector too imprecise (e.g. a bare `h3`)
-   - **several matches per job card** → too broad
-   - **exactly one match per card** → the target
-2. Commit the winner into `## Companies`' CSS Selector cell (via `md_tables`, never a direct
-   file edit):
-   ```bash
-   python3 .kiro/scripts/watchlist_selectors.py write \
-     --company Xanadu --selector "a[data-automation-id='jobTitle']" --apply
-   ```
-   Only this command edits that column.
+1. **CSS Selector (Job Cards):** A selector that uniquely identifies each individual job listing card/link on the company's careers page.
+2. **Next Page:** A selector that identifies the "Next Page" pagination button. If the site has infinite scroll, a "Load More" button, or does not use pagination (all jobs are on one page), you must explicitly write `none`.
+
+### Step 1: Find Candidate Selectors
+
+Because these are SPA sites, you cannot use `curl` to view the HTML. You must inspect the live DOM by injecting JS via `ChromeInterface`. 
+Write a temporary Python script in your workspace that uses `ChromeInterface.open_loaded()` to open the careers page and `ChromeInterface.eval()` to query the DOM for candidate elements. For example:
+- **For Job Cards:** Query for `<a>` tags with job titles.
+- **For Next Page:** Query for buttons or links containing text like "Next" or `aria-label="next"`.
+
+### Step 2: Verify the Job Card Selector
+
+Once you have candidate selectors, you must verify the job card selector matches exactly one element per card:
+
+```bash
+python3 .kiro/scripts/watchlist_selectors.py probe \
+  --url "<careers-url>" --selector "a[data-automation-id='jobTitle']"
+```
+
+It opens the URL in a Scratch tab, extracts matching elements, and prints `{ok, count, samples}`.
+
+- **0 matches** → selector too imprecise
+- **several matches per job card** → too broad
+- **exactly one match per card** → the target
+
+### Step 3: Commit the Selectors
+
+Write BOTH selectors to the table using `watchlist_selectors.py write`:
+
+```bash
+python3 .kiro/scripts/watchlist_selectors.py write \
+  --company "Company Name" \
+  --selector "a[data-automation-id='jobTitle']" \
+  --next-page "button[aria-label='next']" \
+  --apply
+```
+
+*(If there is no next page button, pass `--next-page "none"` so the system knows it was checked).* Only this command safely edits the table without breaking markdown formatting.
 
 ## Scrape the watchlist (scripted, no LLM)
 
@@ -48,10 +69,15 @@ The LLM decides; `watchlist_selectors.py` is the deterministic probe + write-bac
 python3 .kiro/scripts/watchlist_scrape.py --apply
 ```
 
-For every `## Companies` row that has a CSS selector: open the careers URL, scroll to load
-lazy lists, dismiss modals, extract job cards via the selector, resolve relative hrefs, and
-append every entry not already tracked anywhere as `| Added | [Title](<url>) | Status |`
-(with Status empty) to `## Scraped (watchlist)`.
+For every `## Companies` row that has a CSS selector:
+
+1. Open the careers URL in a Scratch tab.
+2. Scroll to load lazy lists and dismiss modals.
+3. Extract job cards via the CSS selector, and resolve relative hrefs.
+4. If a `Next Page` selector exists, click it, wait, and repeat steps 2-3 (up to 5 extra pages, stopping early if no new unique items are found).
+5. All tabs are run concurrently via a thread pool for extreme speed.
+6. Finally, append every entry not already tracked anywhere as `| Added | [Title](<url>) | Status |`
+   (with Status empty) to `## Scraped (watchlist)`.
 
 **"Already tracked"** = the scraped table itself, the flushed table, every applied.md table,
 and manual.md — so applied / saved / rejected / flushed roles are never re-surfaced, and a

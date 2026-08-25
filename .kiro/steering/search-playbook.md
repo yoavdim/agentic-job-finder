@@ -90,8 +90,8 @@ the browser, never a raw webfetch: the boards are JS-rendered (Workday, Lever, A
 SPA career sites).
 
 **Selector-bearing companies are scripted.** For every `## Companies` row with a CSS
-selector filled in, `watchlist_scrape.py` opens the careers URL and extracts the job cards
-by that selector — read-only, nothing is written:
+selector filled in, `watchlist_scrape.py` opens the careers URLs in parallel and extracts the job cards
+by that selector (automatically following pagination if a `Next Page` selector is present) — read-only, nothing is written:
 ```bash
 python3 .kiro/scripts/watchlist_scrape.py --json -   # new postings as JSON on stdout
 ```
