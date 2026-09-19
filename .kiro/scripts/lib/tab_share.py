@@ -95,16 +95,40 @@ def eval_value(code, tab_id=None, base=DEFAULT_BASE, timeout=30):
     return res.get("value") if res.get("ok") else None
 
 
+def query(selector, tab_id=None, base=DEFAULT_BASE, timeout=45):
+    """POST /query -> {count, items, ready} for `selector`.
+
+    Works where eval_value can't: pages whose CSP omits 'unsafe-eval' reject /eval
+    outright. Returns {} on failure, which is also what a pre-/query extension gives, so
+    callers can fall back.
+    """
+    body = {"selector": selector}
+    if tab_id:
+        body["tabId"] = tab_id
+    return post("/query", body, base=base, timeout=timeout).get("result") or {}
+
+
+def scroll(tab_id=None, selector=None, mode=None, base=DEFAULT_BASE, timeout=45):
+    """POST /scroll -> {ok, position, ready}.
+
+    No `selector` scrolls the window; with one, the first match's innermost scrollable
+    ancestor. `mode="wiggle"` nudges up first, restarting a stalled lazy-loader.
+    """
+    body = {}
+    if tab_id:
+        body["tabId"] = tab_id
+    if selector:
+        body["selector"] = selector
+    if mode:
+        body["mode"] = mode
+    return post("/scroll", body, base=base, timeout=timeout).get("result") or {}
+
+
 def extract(url=None, tab_id=None, group_name=None, base=DEFAULT_BASE, timeout=45):
     """POST /extract. Reads rendered {text, title, links, ...} from a tab.
 
-    IMPORTANT: passing `url` alone does NOT open that URL — /extract with no `tabId` reads
-    whatever tab is currently ACTIVE, silently, with no error if it's the wrong page. This
-    was verified directly: `extract(url="https://builtintoronto.com/...")` with some other
-    tab focused returned that other tab's content, `ok: True`, url field showing the wrong
-    page. Always resolve a `tab_id` first (via `open_tab` or `find_tab`) and pass it
-    explicitly; `url` here is accepted only because a caller might already know the tab was
-    just opened at that exact URL and wants a label, not a routing mechanism.
+    Always pass `tab_id` — without it the ACTIVE tab is read, whatever that is, with no
+    error. `url` is a label, not a routing mechanism: it never opens anything.
     """
     body = {}
     if tab_id:

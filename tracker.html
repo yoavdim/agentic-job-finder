@@ -822,8 +822,9 @@ function addManualEntry(f, url, status, title, opts){
   render();
 }
 // ---------- company watchlist (watchlist.md) — chip strip shown above manual.md ----------
-// Schema: | Added | Company | URL | CSS Selector | Referee |. Selector column is unused
-// for now; Referee is `yes`/`no` (default `no` when added via the tracker).
+// Company schema: | Added | Company | URL | CSS Selector | Next Page | Referee |.
+// Selector and pagination are filled by the selector workflow; Referee defaults to `no`
+// when a company is added via the tracker.
 
 // Hostname labels to drop when deriving a display name (job boards, ATS subdomains) and
 // trailing TLD-like labels (e.g. "acme.com" -> ["acme"]).
@@ -932,10 +933,14 @@ function companyNameForUrl(url, hostmap){
   return deriveCompanyName(url);
 }
 
+function watchlistTable(lines, sectionTitle){
+  return parseTables(lines).find(t =>
+    t.sectionTitle.trim().toLowerCase() === sectionTitle.toLowerCase()) || null;
+}
+
 function parseWatchlistEntries(lines){
-  const tables = parseTables(lines);
-  if (!tables.length) return [];
-  const tbl = tables[0];
+  const tbl = watchlistTable(lines, "Companies");
+  if (!tbl) return [];
   return tbl.rows.map(r => ({
     lineIdx: r.lineIdx,
     cells: r.cells,
@@ -943,7 +948,8 @@ function parseWatchlistEntries(lines){
     company: r.cells[1] || "",
     url: r.cells[2] || "",
     selector: r.cells[3] || "",
-    referee: r.cells[4] || "",
+    nextPage: r.cells[4] || "",
+    referee: r.cells[5] || "",
   }));
 }
 
@@ -952,10 +958,9 @@ function addWatchlistEntry(wf, url){
   if (!clean) return;
   const company = escCell(deriveCompanyName(clean));
   const today = new Date().toISOString().slice(0,10);
-  const newLine = `| ${today} | ${company} | ${escCell(clean)} | | no |`;
-  const tables = parseTables(wf.lines);
-  if (tables.length){
-    const tbl = tables[0];
+  const newLine = `| ${today} | ${company} | ${escCell(clean)} | | | no |`;
+  const tbl = watchlistTable(wf.lines, "Companies");
+  if (tbl){
     const insertIdx = tbl.rows.length ? tbl.rows[tbl.rows.length-1].lineIdx + 1 : tbl.headerIdx + 2;
     wf.lines.splice(insertIdx, 0, newLine);
   } else {
@@ -963,6 +968,143 @@ function addWatchlistEntry(wf, url){
   }
   wf.dirty = true; updateDirtyUI();
   wf.tables = parseTables(wf.lines);
+}
+
+// Job-board searches are deliberately separate from companies: they are saved for later
+// review but are not targets for the company selector/scrape workflow. Their selector
+// columns are retained now so the schema is ready when search-board scraping is added.
+function parseSearchEngineEntries(lines){
+  const tbl = watchlistTable(lines, "Search engines");
+  if (!tbl) return [];
+  return tbl.rows.map(r => ({
+    lineIdx: r.lineIdx,
+    cells: r.cells,
+    added: r.cells[0] || "",
+    search: r.cells[1] || "",
+    url: r.cells[2] || "",
+    selector: r.cells[3] || "",
+    nextPage: r.cells[4] || "",
+  }));
+}
+
+function searchName(url, title){
+  const cleanTitle = (title || "").replace(/\s+/g, " ").trim();
+  if (cleanTitle) return cleanTitle.slice(0, 120);
+  try{ return new URL(url).hostname.replace(/^www\./i, ""); }catch{ return url; }
+}
+
+function addSearchEngineEntry(wf, url, title){
+  const clean = (url || "").replace(/\r?\n/g," ").trim();
+  if (!clean) return;
+  const today = new Date().toISOString().slice(0,10);
+  const newLine = `| ${today} | ${escCell(searchName(clean, title))} | ${escCell(clean)} | | |`;
+  const tbl = watchlistTable(wf.lines, "Search engines");
+  if (!tbl){
+    alert("watchlist.md has no '## Search engines' table.");
+    return;
+  }
+  const insertIdx = tbl.rows.length ? tbl.rows[tbl.rows.length-1].lineIdx + 1 : tbl.headerIdx + 2;
+  wf.lines.splice(insertIdx, 0, newLine);
+  wf.dirty = true; updateDirtyUI();
+  wf.tables = parseTables(wf.lines);
+}
+
+// Search-engine chips mirror the company strip but intentionally keep the default border
+// color: a saved search is not a company identity. This is storage/UI only — no scraper
+// reads the `## Search engines` table yet.
+function renderSearchEngineStrip(){
+  const wf = files.get("watchlist.md");
+  if (!wf) return;
+  const entries = parseSearchEngineEntries(wf.lines);
+  const wrap = document.createElement("div");
+  wrap.className = "watchwrap";
+  wrap.appendChild(makeHint("Job board searches — saved for later review; not scraped yet."));
+
+  const row = document.createElement("div");
+  row.className = "chiprow";
+  const leftNub = document.createElement("button");
+  leftNub.className = "chip-scroll"; leftNub.textContent = "‹"; leftNub.title = "Scroll left";
+  const rightNub = document.createElement("button");
+  rightNub.className = "chip-scroll"; rightNub.textContent = "›"; rightNub.title = "Scroll right";
+  const strip = document.createElement("div");
+  strip.className = "chipstrip";
+  strip.setAttribute("aria-label", "Saved job board searches");
+
+  if (!entries.length){
+    const empty = document.createElement("span");
+    empty.className = "chip-empty";
+    empty.textContent = "No job board searches yet — click + to add one from a split tab.";
+    strip.appendChild(empty);
+  }
+  entries.forEach(entry => {
+    const chip = document.createElement("span");
+    chip.className = "chip"; chip.title = entry.url;
+    const label = document.createElement("span");
+    label.textContent = entry.search || entry.url;
+    chip.appendChild(label);
+    chip.addEventListener("click", ev => {
+      if (isInteractiveClick(ev)) return;
+      if (entry.url) openInSplit(entry.url);
+    });
+    chip.appendChild(makeDeleteButton("Remove saved job board search", () => {
+      if (!confirm(`Remove ${entry.search || entry.url} from saved job board searches?`)) return;
+      wf.lines.splice(entry.lineIdx, 1);
+      wf.dirty = true; updateDirtyUI();
+      wf.tables = parseTables(wf.lines);
+      render();
+    }, "chip-del"));
+    strip.appendChild(chip);
+  });
+
+  const updateNubs = () => {
+    const overflowing = strip.scrollWidth > strip.clientWidth + 1;
+    leftNub.style.display = overflowing ? "flex" : "none";
+    rightNub.style.display = overflowing ? "flex" : "none";
+    if (!overflowing) return;
+    leftNub.disabled = strip.scrollLeft <= 0;
+    rightNub.disabled = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+  };
+  let scrollTimer = null;
+  const startScroll = dir => {
+    if (!scrollTimer) scrollTimer = setInterval(() => { strip.scrollLeft += dir * 8; updateNubs(); }, 16);
+  };
+  const stopScroll = () => { clearInterval(scrollTimer); scrollTimer = null; };
+  for (const [nub, dir] of [[leftNub, -1], [rightNub, 1]]){
+    nub.addEventListener("mouseenter", () => startScroll(dir));
+    nub.addEventListener("mouseleave", stopScroll);
+    nub.addEventListener("mouseup", stopScroll);
+  }
+  strip.addEventListener("scroll", updateNubs);
+  window.addEventListener("resize", updateNubs);
+  requestAnimationFrame(updateNubs);
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "chip-add"; addBtn.textContent = "+";
+  addBtn.title = "Add job board search from the split-pane tab";
+  addBtn.addEventListener("click", async () => {
+    await detectSplitPartner();
+    if (partnerTabId == null){
+      alert("No split pane detected. Split this tab first (right-click → Split tab), then retry.");
+      return;
+    }
+    try{
+      const r = await fetch(TAB_SHARE + "/tabs", { cache: "no-store", headers: { "X-Tab-Url": window.location.href } });
+      const data = await r.json();
+      const partner = (data.tabs || []).find(t => t.id === partnerTabId);
+      if (partner && partner.url){
+        addSearchEngineEntry(wf, partner.url, partner.title || "");
+        render();
+      } else {
+        alert("Could not read the split-partner tab URL.");
+      }
+    }catch(e){
+      alert("Tab Share error: " + e.message);
+    }
+  });
+
+  row.append(leftNub, strip, rightNub, addBtn);
+  wrap.appendChild(row);
+  mainEl.appendChild(wrap);
 }
 
 // Chip per watched company (click = open in split pane), a right-pinned "+" (grabs the
@@ -1087,6 +1229,7 @@ function renderManual(f){
 
   const hostmap = watchlistHostmap();
   const colorMap = buildCompanyColorMap(f.lines, hostmap);
+  renderSearchEngineStrip();
   renderWatchlistStrip(colorMap);
 
   mainEl.appendChild(makeSectionHeading("Manual URL additions"));

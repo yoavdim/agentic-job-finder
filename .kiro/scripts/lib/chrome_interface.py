@@ -33,6 +33,7 @@ import json
 import re
 import sys
 import time
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -40,6 +41,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tab_share as TS
 
 SCRATCH_GROUP = "Scratch"
+
+
+class _ElementHTML(HTMLParser):
+    """Visible text + first href from one element's outerHTML."""
+
+    # skipped so icon markup doesn't leak into the title
+    SKIP_TAGS = frozenset({"script", "style", "svg", "noscript"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.href = ""
+        self._parts = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP_TAGS:
+            self._skip_depth += 1
+        if not self.href:
+            href = dict(attrs).get("href")
+            if href:
+                self.href = href
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if not self._skip_depth and data.strip():
+            self._parts.append(data.strip())
+
+    @property
+    def text(self):
+        return re.sub(r"\s+", " ", " ".join(self._parts)).strip()
+
+
+def parse_element_html(html):
+    """{text, href, html} for one element's outerHTML."""
+    p = _ElementHTML()
+    try:
+        p.feed(html)
+        p.close()
+    except Exception:
+        pass
+    return {"text": p.text, "href": p.href, "html": html}
 
 # ---- browser snippets. All are IIFEs: a top-level `return` is a SyntaxError in an
 # /eval context (verified live). ----
@@ -173,11 +218,22 @@ class ChromeInterface:
             return None
         deadline = time.time() + (load_timeout or self.load_timeout)
         while time.time() < deadline:
-            if self.eval(tid, _READY_JS) == "complete":
+            if self.ready(tid) == "complete":
                 break
             time.sleep(0.5)
         time.sleep(wait if wait is not None else self.wait)
         return tid
+
+    def ready(self, tab_id):
+        """The tab's document.readyState, or None when it can't be read.
+
+        Read via /query so it also works on pages that refuse /eval — there the load poll
+        could never succeed, so every open paid the full load_timeout.
+        """
+        res = TS.query("html", tab_id=tab_id, base=self.base)
+        if res.get("ready"):
+            return res["ready"]
+        return self.eval(tab_id, _READY_JS)
 
     def eval(self, tab_id, code, timeout=30):
         return TS.eval_value(code, tab_id=tab_id, base=self.base, timeout=timeout)
@@ -196,10 +252,8 @@ class ChromeInterface:
     def extract_text(self, url, timeout=45):
         """Rendered page text + title for `url`. Returns (text, error).
 
-        Opens `url` in its own tab and extracts BY that tab's id — /extract with no
-        tabId silently reads whatever tab is currently active (verified directly), so
-        the URL is never routed by string. The tab is closed here so a caller looping
-        over many URLs doesn't accumulate one open tab per URL.
+        Extracts by tab id, never by URL (see tab_share.extract), and closes the tab so a
+        caller looping over many URLs doesn't accumulate one open tab each.
         """
         tab_id = self.open(url)
         if not tab_id:
@@ -213,31 +267,57 @@ class ChromeInterface:
             self.close([tab_id], expect_host=host_of(url) or "*")
 
     def extract_elements(self, tab_id, selector):
-        """{count, items:[{text,href}]} for every element matching `selector`, or
-        {"error": ...} when the selector is invalid or the eval failed."""
+        """{count, items:[{text,href,html}]} for elements matching `selector`, or
+        {"error": ...}.
+
+        Selectors must target the anchor itself (`a.posting-title`, not
+        `a.posting-title h5`) — href is read from the match or its descendants, never an
+        ancestor. Uses /query, falling back to /eval for extensions predating it.
+        """
         if not selector:
             return {"error": "empty selector"}
+        res = TS.query(selector, tab_id=tab_id, base=self.base)
+        if res:
+            if "error" in res:
+                return res
+            items = res.get("items") or []
+            if items and isinstance(items[0], str):
+                items = [parse_element_html(h) for h in items]
+                res = dict(res, items=items, count=len(items))
+            return res
         code = _EXTRACT_JS.replace("{sel}", json.dumps(selector))
-        return self.eval(tab_id, code) or {"error": "eval failed or timed out"}
+        return self.eval(tab_id, code) or {"error": "query and eval both failed"}
 
     # ---- page-driving ----
+
+    def _scroll(self, tab_id, selector=None, mode=None, fallback_js=None):
+        """One /scroll call, falling back to `fallback_js` via /eval when unavailable.
+        Returns the position string. See extract_elements for why /scroll is preferred."""
+        res = TS.scroll(tab_id=tab_id, selector=selector, mode=mode, base=self.base)
+        if res:
+            return res.get("position")
+        if fallback_js is None:
+            return None
+        code = (fallback_js if selector is None
+                else fallback_js.replace("{sel}", json.dumps(selector)))
+        return self.eval(tab_id, code)
 
     def scroll(self, tab_id, steps=1, pause=2):
         """Scroll the WINDOW to the bottom `steps` times, pausing `pause` between."""
         for _ in range(max(1, steps)):
-            self.eval(tab_id, _SCROLL_JS)
+            self._scroll(tab_id, fallback_js=_SCROLL_JS)
             time.sleep(pause)
 
     def scroll_container(self, tab_id, selector):
         """Scroll the lazy-list container holding `selector` to the bottom. Returns the
-        JS position string (or 'no-cards' when the selector matches nothing)."""
-        code = _SCROLL_CONTAINER_JS.replace("{sel}", json.dumps(selector))
-        return self.eval(tab_id, code)
+        position string (or 'no-cards' when the selector matches nothing)."""
+        return self._scroll(tab_id, selector=selector,
+                            fallback_js=_SCROLL_CONTAINER_JS)
 
     def scroll_wiggle(self, tab_id, selector):
         """Nudge the container up then back to the bottom (stalled lazy-loader nudge)."""
-        code = _SCROLL_WIGGLE_JS.replace("{sel}", json.dumps(selector))
-        return self.eval(tab_id, code)
+        return self._scroll(tab_id, selector=selector, mode="wiggle",
+                            fallback_js=_SCROLL_WIGGLE_JS)
 
     def close_modals(self, tab_id):
         """Best-effort consent/cookie dismissal. Returns the list of clickers used."""

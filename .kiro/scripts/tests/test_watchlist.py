@@ -97,7 +97,7 @@ class PlanCompanyTests(unittest.TestCase):
              patch.object(ci, "extract_elements", return_value=res), \
              patch.object(ci, "close") as cl:
             out = WS.plan_company("Built In", "https://builtintoronto.com/jobs",
-                                  "a.card", recorded=set(), ci=ci)
+                                  "a.card", "", recorded=set(), ci=ci)
         self.assertIsNone(out["error"])
         self.assertEqual(len(out["new"]), 2)
         self.assertEqual(out["new"][0]["url"],
@@ -107,11 +107,15 @@ class PlanCompanyTests(unittest.TestCase):
         cl.assert_called_once_with([1], expect_host="*")
 
     def test_error_surfaces_without_closing_twice(self):
+        # scroll/close_modals are patched because plan_company drives them before
+        # extracting; unpatched they reach the real Tab Share over HTTP.
         ci = WS.ChromeInterface()
         with patch.object(ci, "open_loaded", return_value=1), \
+             patch.object(ci, "scroll"), \
+             patch.object(ci, "close_modals"), \
              patch.object(ci, "extract_elements", return_value={"error": "bad selector"}), \
              patch.object(ci, "close") as cl:
-            out = WS.plan_company("X", "https://x.test", "a[", recorded=set(), ci=ci)
+            out = WS.plan_company("X", "https://x.test", "a[", "", recorded=set(), ci=ci)
         self.assertEqual(out["error"], "bad selector")
         cl.assert_called_once_with([1], expect_host="*")
 
